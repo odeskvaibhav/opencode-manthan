@@ -39,6 +39,7 @@ import type {
 } from "@opencode-ai/sdk/v2"
 import { useLocal } from "../../context/local"
 import { Locale } from "../../util/locale"
+import { manthanContextFromMetadata } from "../../util/manthan-context"
 import { webSearchProviderLabel } from "../../util/tool-display"
 import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import { useSDK } from "../../context/sdk"
@@ -283,6 +284,28 @@ export function Session() {
   const toast = useToast()
   const sdk = useSDK()
   const editor = useEditorContext()
+
+  // Phase 3: toast when Manthan reports a server-side condense.
+  let lastManthanStatus: string | null | undefined
+  createEffect(() => {
+    const usage = manthanContextFromMetadata(session()?.metadata as Record<string, unknown> | undefined)
+    const status = usage?.compaction_status ?? null
+    if (
+      status &&
+      status !== lastManthanStatus &&
+      /compact|digest|condens/i.test(status) &&
+      status !== "ok" &&
+      status !== "none" &&
+      status !== "normal"
+    ) {
+      toast.show({
+        variant: "success",
+        message: `Context condensed by Manthan (${status})`,
+        duration: 3500,
+      })
+    }
+    lastManthanStatus = status
+  })
 
   createEffect(() => {
     const sessionID = route.sessionID
@@ -560,27 +583,38 @@ export function Session() {
       },
     },
     {
-      title: "Compact session",
+      title: "Condense context",
       value: "session.compact",
       category: "Session",
       slash: {
         name: "compact",
-        aliases: ["summarize"],
+        aliases: ["summarize", "condense"],
       },
       run: () => {
         const selectedModel = local.model.current()
         if (!selectedModel) {
           toast.show({
             variant: "warning",
-            message: "Connect a provider to summarize this session",
+            message: "Connect a provider to condense this session",
             duration: 3000,
           })
           return
         }
+        const manthan =
+          selectedModel.providerID === "manthan" ||
+          selectedModel.providerID.includes("manthan") ||
+          Boolean(manthanContextFromMetadata(session()?.metadata as Record<string, unknown> | undefined))
         void sdk.client.session.summarize({
           sessionID: route.sessionID,
           modelID: selectedModel.modelID,
           providerID: selectedModel.providerID,
+        })
+        toast.show({
+          variant: "info",
+          message: manthan
+            ? "Manthan is condensing context (server-owned)…"
+            : "Compacting session…",
+          duration: 2500,
         })
         dialog.clear()
       },

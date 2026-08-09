@@ -1,32 +1,65 @@
 {
-  "name": "opencode",
-  "displayName": "opencode",
-  "description": "opencode for VS Code",
+  "name": "manthan-opencode",
+  "displayName": "Manthan",
+  "description": "Manthan-first OpenCode for VS Code — Manthan owns context compaction (Option A)",
   "version": "1.18.15",
-  "publisher": "sst-dev",
+  "publisher": "manthan",
   "repository": {
     "type": "git",
-    "url": "https://github.com/anomalyco/opencode"
+    "url": "https://github.com/odeskvaibhav/opencode-manthan"
   },
   "license": "MIT",
   "icon": "images/icon.png",
   "galleryBanner": {
-    "color": "#000000",
+    "color": "#0B1220",
     "theme": "dark"
   },
   "engines": {
     "vscode": "^1.94.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "AI"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "Manthan",
+      "properties": {
+        "manthan.baseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3000/v1",
+          "description": "Manthan OpenAI-compatible API base URL (…/v1)"
+        },
+        "manthan.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Manthan API key (or set MANTHAN_API_KEY env)"
+        },
+        "manthan.model": {
+          "type": "string",
+          "default": "manthan/laguna-xs-2.1-sharded",
+          "description": "Default Manthan model id"
+        },
+        "manthan.binary": {
+          "type": "string",
+          "default": "opencode",
+          "description": "OpenCode / Manthan CLI binary on PATH (or absolute path)"
+        },
+        "manthan.showPowerFields": {
+          "type": "boolean",
+          "default": false,
+          "description": "Status bar: show fresh tokens, reuse %, cache epoch"
+        }
+      }
+    },
     "commands": [
       {
         "command": "opencode.openTerminal",
-        "title": "Open opencode",
+        "title": "Manthan: Open",
         "icon": {
           "light": "images/button-dark.svg",
           "dark": "images/button-light.svg"
@@ -34,7 +67,7 @@
       },
       {
         "command": "opencode.openNewTerminal",
-        "title": "Open opencode in new tab",
+        "title": "Manthan: Open in new tab",
         "icon": {
           "light": "images/button-dark.svg",
           "dark": "images/button-light.svg"
@@ -42,7 +75,23 @@
       },
       {
         "command": "opencode.addFilepathToTerminal",
-        "title": "Add Filepath to Terminal"
+        "title": "Manthan: Insert @filepath"
+      },
+      {
+        "command": "opencode.manthanSettings",
+        "title": "Manthan: Open settings"
+      },
+      {
+        "command": "opencode.manthanHealth",
+        "title": "Manthan: Health check"
+      },
+      {
+        "command": "opencode.manthanDocs",
+        "title": "Manthan: Option A docs"
+      },
+      {
+        "command": "opencode.manthanCondense",
+        "title": "Manthan: Condense context"
       }
     ],
     "menus": {
@@ -56,7 +105,7 @@
     "keybindings": [
       {
         "command": "opencode.openTerminal",
-        "title": "Run opencode",
+        "title": "Open Manthan",
         "key": "cmd+escape",
         "mac": "cmd+escape",
         "win": "ctrl+escape",
@@ -64,7 +113,7 @@
       },
       {
         "command": "opencode.openNewTerminal",
-        "title": "Run opencode",
+        "title": "Open Manthan in new tab",
         "key": "cmd+shift+escape",
         "mac": "cmd+shift+escape",
         "win": "ctrl+shift+escape",
@@ -72,7 +121,7 @@
       },
       {
         "command": "opencode.addFilepathToTerminal",
-        "title": "opencode: Insert At-Mentioned",
+        "title": "Manthan: Insert At-Mentioned",
         "key": "cmd+alt+k",
         "mac": "cmd+alt+k",
         "win": "ctrl+alt+K",
@@ -91,7 +140,8 @@
     "pretest": "bun run compile-tests && bun run compile && bun run lint",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "test:unit": "bun test src/manthan.test.ts"
   },
   "devDependencies": {
     "@types/vscode": "^1.94.0",

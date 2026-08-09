@@ -22,6 +22,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { buildPrompt } from "@opencode-ai/core/session/compaction"
 import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
+import { isManthanProviderID, manthanClientCompactAllowed } from "@/provider/manthan"
 
 export const Event = SessionCompactionEvent
 
@@ -556,6 +557,19 @@ const layer = Layer.effect(
       auto: boolean
       overflow?: boolean
     }) {
+      // Option A: never enqueue OpenCode's LLM summarize agent against Manthan
+      // (auto or manual /compact). Escape: OPENCODE_MANTHAN_ALLOW_CLIENT_COMPACT=1
+      if (isManthanProviderID(input.model.providerID) && !manthanClientCompactAllowed()) {
+        yield* Effect.logInfo("skipping OpenCode compaction for Manthan provider (Option A)")
+        return
+      }
+      if (input.auto) {
+        const cfg = yield* config.get()
+        if (cfg.compaction?.auto === false) {
+          yield* Effect.logInfo("skipping auto compaction (compaction.auto=false; Manthan Option A)")
+          return
+        }
+      }
       const msg = yield* session.updateMessage({
         id: MessageID.ascending(),
         role: "user",

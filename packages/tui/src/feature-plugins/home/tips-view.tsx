@@ -181,7 +181,7 @@ const TIPS: Tip[] = [
     shortcuts.sessionQuickSwitch1() && shortcuts.sessionQuickSwitch9()
       ? `Use ${shortcutText(shortcuts.sessionQuickSwitch1())} through ${shortcutText(shortcuts.sessionQuickSwitch9())} to switch pinned sessions`
       : undefined,
-  "Run {highlight}/compact{/highlight} to summarize long sessions near context limits",
+  "Against Manthan, {highlight}/compact{/highlight} asks the server to condense context (Option A — not OpenCode LLM summarize)",
   (shortcuts) => `Use ${commandText("/export", shortcuts.sessionExport())} to save the conversation as Markdown`,
   (shortcuts) => press(shortcuts.messagesCopy(), "to copy the assistant's last message to clipboard"),
   (shortcuts) => press(shortcuts.commandList(), "to see all available actions and commands"),

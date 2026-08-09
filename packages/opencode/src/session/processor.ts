@@ -25,6 +25,7 @@ import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
+import { takeManthanContext } from "@/provider/manthan"
 
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
@@ -454,6 +455,24 @@ const layer = Layer.effect(
               cost: usage.cost,
             })
             yield* session.updateMessage(ctx.assistantMessage)
+            // Persist Manthan context headers onto session.metadata for TUI / ACP.
+            try {
+              const manthan = takeManthanContext(ctx.sessionID)
+              if (manthan) {
+                const current = yield* session.get(ctx.sessionID).pipe(Effect.catchAll(() => Effect.succeed(null)))
+                if (current) {
+                  yield* session.setMetadata({
+                    sessionID: ctx.sessionID,
+                    metadata: {
+                      ...(current.metadata ?? {}),
+                      manthan,
+                    },
+                  })
+                }
+              }
+            } catch {
+              // ignore
+            }
             if (ctx.snapshot) {
               const patch = yield* snapshot.patch(ctx.snapshot)
               if (patch.files.length) {

@@ -39,6 +39,7 @@ import { type AutocompleteRef, Autocomplete } from "./autocomplete"
 import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { AssistantMessage, FilePart, UserMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
+import { formatManthanContextLabel, manthanContextFromMetadata } from "../../util/manthan-context"
 import { errorMessage } from "../../util/error"
 import { formatDuration } from "../../util/format"
 import { createColors, createFrames } from "../../ui/spinner"
@@ -264,6 +265,22 @@ export function Prompt(props: PromptProps) {
   const usage = createMemo(() => {
     if (!props.sessionID) return
     const session = sync.session.get(props.sessionID)
+    const cost = session?.cost ?? 0
+    const costLabel = cost > 0 ? money.format(cost) : undefined
+
+    // Prefer Manthan authoritative context % when present (Phase 2).
+    const manthanUsage = manthanContextFromMetadata(session?.metadata as Record<string, unknown> | undefined)
+    const manthanLabel = manthanUsage ? formatManthanContextLabel(manthanUsage) : undefined
+    if (manthanLabel) {
+      const status = manthanUsage?.compaction_status
+      const chip =
+        status && status !== "ok" && status !== "none" && status !== "normal" ? ` · ${status}` : ""
+      return {
+        context: `${manthanLabel}${chip}`,
+        cost: costLabel,
+      }
+    }
+
     const msg = sync.data.message[props.sessionID] ?? []
     const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
     if (!last) return
@@ -274,10 +291,9 @@ export function Prompt(props: PromptProps) {
 
     const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
-    const cost = session?.cost ?? 0
     return {
       context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
-      cost: cost > 0 ? money.format(cost) : undefined,
+      cost: costLabel,
     }
   })
 

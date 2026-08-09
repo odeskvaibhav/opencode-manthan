@@ -1763,6 +1763,24 @@ const layer = Layer.effect(
             timeout: false,
           }).finally(() => headerTimeoutCtl?.clear())
 
+          // Phase 2: capture Manthan context headers before the SSE body is consumed.
+          try {
+            const {
+              parseManthanContextHeaders,
+              rememberManthanContext,
+              sessionIDFromRequestHeaders,
+            } = await import("./manthan")
+            const usage = parseManthanContextHeaders(res.headers)
+            if (usage) {
+              const sessionID = sessionIDFromRequestHeaders(
+                opts.headers as Headers | Record<string, string> | undefined,
+              )
+              if (sessionID) rememberManthanContext(sessionID, usage)
+            }
+          } catch {
+            // ignore — never break provider fetch on telemetry
+          }
+
           if (!chunkAbortCtl) return res
           return wrapSSE(res, chunkTimeout, chunkAbortCtl)
         }

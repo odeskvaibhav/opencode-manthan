@@ -38,6 +38,11 @@ import {
 } from "../groups/session"
 import { PermissionNotFoundError } from "../errors"
 import * as SessionError from "./session-errors"
+import {
+  isManthanProviderID,
+  manthanClientCompactAllowed,
+  requestManthanCompact,
+} from "@/provider/manthan"
 
 const tryParseJson = (text: string) =>
   Effect.try({
@@ -278,6 +283,28 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       const messages = yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
       const defaultAgent = yield* agentSvc.defaultAgent()
       const currentAgent = messages.findLast((message) => message.info.role === "user")?.info.agent ?? defaultAgent
+
+      // Option A / Phase 3: Manthan owns condense — send x-manthan-compact, not OpenCode LLM summarize.
+      if (isManthanProviderID(ctx.payload.providerID) && !manthanClientCompactAllowed()) {
+        requestManthanCompact(ctx.params.sessionID)
+        yield* promptSvc
+          .prompt({
+            sessionID: ctx.params.sessionID,
+            agent: currentAgent,
+            model: {
+              providerID: ctx.payload.providerID,
+              modelID: ctx.payload.modelID,
+            },
+            parts: [
+              {
+                type: "text",
+                text: "Condense older context (Manthan) and continue with the current task. Keep recent work and open questions.",
+              },
+            ],
+          })
+          .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+        return true
+      }
 
       yield* compactSvc.create({
         sessionID: ctx.params.sessionID,

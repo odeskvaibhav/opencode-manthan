@@ -1,7 +1,8 @@
 import type { AssistantMessage } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
-import { createMemo } from "solid-js"
+import { createMemo, Show } from "solid-js"
+import { manthanContextFromMetadata } from "../../util/manthan-context"
 
 const id = "internal:sidebar-context"
 
@@ -17,11 +18,29 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const cost = createMemo(() => session()?.cost ?? 0)
 
   const state = createMemo(() => {
+    const manthan = manthanContextFromMetadata(session()?.metadata as Record<string, unknown> | undefined)
+    if (manthan && (manthan.context_used != null || manthan.context_usage_percent != null)) {
+      return {
+        tokens: manthan.context_used ?? 0,
+        percent: manthan.context_usage_percent != null ? Math.round(manthan.context_usage_percent) : null,
+        source: "manthan" as const,
+        status: manthan.compaction_status,
+        power: {
+          fresh: manthan.newly_evaluated_tokens,
+          reuse: manthan.cache_reuse_percent != null ? Math.round(manthan.cache_reuse_percent) : null,
+          epoch: manthan.cache_epoch,
+        },
+      }
+    }
+
     const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
     if (!last) {
       return {
         tokens: 0,
         percent: null,
+        source: "local" as const,
+        status: null as string | null,
+        power: null as null,
       }
     }
 
@@ -31,6 +50,9 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
     return {
       tokens,
       percent: model?.limit.context ? Math.round((tokens / model.limit.context) * 100) : null,
+      source: "local" as const,
+      status: null as string | null,
+      power: null as null,
     }
   })
 
@@ -40,7 +62,17 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
         <b>Context</b>
       </text>
       <text fg={theme().textMuted}>{state().tokens.toLocaleString()} tokens</text>
-      <text fg={theme().textMuted}>{state().percent ?? 0}% used</text>
+      <text fg={theme().textMuted}>
+        {state().percent ?? 0}% used{state().source === "manthan" ? " · Manthan" : ""}
+      </text>
+      {state().status && state().status !== "ok" && state().status !== "none" && state().status !== "normal" ? (
+        <text fg={theme().textMuted}>{state().status}</text>
+      ) : null}
+      <Show when={state().source === "manthan" && state().power}>
+        <text fg={theme().textMuted}>fresh {state().power!.fresh ?? "—"}</text>
+        <text fg={theme().textMuted}>reuse {state().power!.reuse ?? "—"}%</text>
+        <text fg={theme().textMuted}>epoch {state().power!.epoch ?? "—"}</text>
+      </Show>
       <text fg={theme().textMuted}>{money.format(cost())} spent</text>
     </box>
   )
