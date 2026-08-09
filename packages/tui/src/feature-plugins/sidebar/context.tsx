@@ -2,7 +2,7 @@ import type { AssistantMessage } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, Show } from "solid-js"
-import { manthanContextFromMetadata } from "../../util/manthan-context"
+import { compactAtFromModel, manthanContextFromMetadata } from "../../util/manthan-context"
 
 const id = "internal:sidebar-context"
 
@@ -19,10 +19,12 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
 
   const state = createMemo(() => {
     const manthan = manthanContextFromMetadata(session()?.metadata as Record<string, unknown> | undefined)
-    if (manthan && (manthan.context_used != null || manthan.context_usage_percent != null)) {
+    if (manthan && (manthan.context_used != null || manthan.context_usage_percent != null || manthan.context_limit != null)) {
       return {
         tokens: manthan.context_used ?? 0,
+        limit: manthan.context_limit,
         percent: manthan.context_usage_percent != null ? Math.round(manthan.context_usage_percent) : null,
+        compactAt: manthan.compaction_threshold != null ? Math.round(manthan.compaction_threshold) : null,
         source: "manthan" as const,
         status: manthan.compaction_status,
         power: {
@@ -37,7 +39,9 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
     if (!last) {
       return {
         tokens: 0,
+        limit: null as number | null,
         percent: null,
+        compactAt: null as number | null,
         source: "local" as const,
         status: null as string | null,
         power: null as null,
@@ -49,7 +53,9 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
     const model = props.api.state.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     return {
       tokens,
+      limit: model?.limit.context ?? null,
       percent: model?.limit.context ? Math.round((tokens / model.limit.context) * 100) : null,
+      compactAt: compactAtFromModel(model),
       source: "local" as const,
       status: null as string | null,
       power: null as null,
@@ -61,10 +67,16 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       <text fg={theme().text}>
         <b>Context</b>
       </text>
-      <text fg={theme().textMuted}>{state().tokens.toLocaleString()} tokens</text>
+      <text fg={theme().textMuted}>
+        {state().tokens.toLocaleString()}
+        {state().limit != null ? ` / ${Number(state().limit).toLocaleString()}` : ""} tokens
+      </text>
       <text fg={theme().textMuted}>
         {state().percent ?? 0}% used{state().source === "manthan" ? " · Manthan" : ""}
       </text>
+      {state().compactAt != null ? (
+        <text fg={theme().textMuted}>compact at {state().compactAt}%</text>
+      ) : null}
       {state().status && state().status !== "ok" && state().status !== "none" && state().status !== "normal" ? (
         <text fg={theme().textMuted}>{state().status}</text>
       ) : null}

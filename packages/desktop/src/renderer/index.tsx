@@ -257,7 +257,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
       const notification = new Notification(title, {
         body: description ?? "",
-        icon: "https://opencode.ai/favicon-96x96-v3.png",
+        icon: "./favicon-base-256px.png",
       })
       notification.onclick = () => {
         void window.api.showWindow()
@@ -326,7 +326,7 @@ listenForDeepLinks()
 function LoadingSplash() {
   return (
     <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base">
-      <Splash class="w-16 h-20 opacity-50 animate-pulse" />
+      <Splash class="w-[clamp(10rem,38vw,18rem)]" />
     </div>
   )
 }

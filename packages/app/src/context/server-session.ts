@@ -22,6 +22,7 @@ import { compareMessages, messageKey, normalizeSessionMessages } from "@/utils/s
 import { dropSessionCaches, pickSessionCacheEvictions, SESSION_CACHE_LIMIT } from "./global-sync/session-cache"
 import { createV2SessionReducer, type V2SessionReduction } from "./server-session-v2-reducer"
 import type { ServerApi } from "@/utils/server"
+import { notifyManthanPromptProgress } from "@/pages/new-session/manthan-prompt-progress"
 
 type MessageApi = ServerApi["message"]
 
@@ -1025,6 +1026,20 @@ export function createServerSession(
       case "session.status": {
         const props = event.properties as { sessionID: string; status: SessionStatus }
         setData("session_status", props.sessionID, reconcile(props.status))
+        return
+      }
+      case "manthan.prompt_progress": {
+        const props = event.properties as {
+          sessionID: string
+          percent: number | null
+          prompt_tokens: number | null
+          prompt_tokens_processed: number | null
+          prompt_tokens_cached?: number | null
+          stage: string | null
+          message: string | null
+        }
+        if (!props?.sessionID) return
+        notifyManthanPromptProgress(props)
         return
       }
       case "message.updated": {

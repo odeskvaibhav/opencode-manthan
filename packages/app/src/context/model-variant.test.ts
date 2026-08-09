@@ -2,6 +2,18 @@ import { describe, expect, test } from "bun:test"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
 
 describe("model variant", () => {
+  test("resolves agent variant when agent.model is omitted", () => {
+    const value = getConfiguredAgentVariant({
+      agent: { variant: "medium" },
+      model: {
+        providerID: "manthan",
+        modelID: "laguna-xs-2.1-sharded",
+        variants: { none: {}, low: {}, medium: {}, high: {} },
+      },
+    })
+    expect(value).toBe("medium")
+  })
+
   test("resolves configured agent variant when model matches", () => {
     const value = getConfiguredAgentVariant({
       agent: {

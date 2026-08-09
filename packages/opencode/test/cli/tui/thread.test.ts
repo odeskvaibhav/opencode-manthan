@@ -51,6 +51,15 @@ describe("tui thread", () => {
     expect(resolveThreadDirectory(undefined, pwd.path, cwd.path)).toBe(cwd.path)
   })
 
+  test("OPENCODE_LAUNCH_CWD wins over bun --cwd when no project arg", async () => {
+    await using launch = await tmpdir({ git: true })
+    await using pwd = await tmpdir({ git: true })
+    await using cwd = await tmpdir({ git: true })
+
+    expect(resolveThreadDirectory(undefined, pwd.path, cwd.path, launch.path)).toBe(launch.path)
+    expect(resolveThreadDirectory(".", pwd.path, cwd.path, launch.path)).toBe(launch.path)
+  })
+
   test("parses supported --no-replay forms", async () => {
     for (const option of ["--no-replay", "--no-replay=true", "--noReplay"]) {
       const args = await yargs([])

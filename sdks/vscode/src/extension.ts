@@ -4,8 +4,8 @@ import {
   formatStatusBar,
   manthanHealthCheck,
   readManthanSettings,
-  writeTempManthanConfig,
 } from "./manthan"
+import { manthanCliCommand } from "./manthan-config"
 
 const TERMINAL_NAME = "Manthan"
 /** Kept for focusing older terminals opened before rebrand. */
@@ -104,44 +104,33 @@ export function activate(context: vscode.ExtensionContext) {
   })
 
   async function openTerminal(ctx: vscode.ExtensionContext) {
+    // Provider/model/key come from ~/.config/opencode/opencode.jsonc — no temp OPENCODE_CONFIG overlay.
     const settings = readManthanSettings()
-    if (!settings.apiKey && !process.env.MANTHAN_API_KEY) {
-      const pick = await vscode.window.showWarningMessage(
-        "Manthan API key not set. Add manthan.apiKey in settings or MANTHAN_API_KEY.",
-        "Open settings",
-        "Continue anyway",
-      )
-      if (pick === "Open settings") {
-        await vscode.commands.executeCommand("workbench.action.openSettings", "manthan.apiKey")
-        return
-      }
-    }
-
     const port = Math.floor(Math.random() * (65535 - 16384 + 1)) + 16384
     activePort = port
-    const configPath = writeTempManthanConfig(settings)
+    const env: Record<string, string> = {
+      _EXTENSION_OPENCODE_PORT: port.toString(),
+      OPENCODE_CALLER: "vscode",
+      OPENCODE_MANTHAN_MODE: "1",
+    }
+    const apiKey = settings.apiKey || process.env.MANTHAN_API_KEY
+    if (apiKey) env.MANTHAN_API_KEY = apiKey
+    const workspaceDir = getWorkspaceDirectory()
+    if (workspaceDir) env.OPENCODE_LAUNCH_CWD = workspaceDir
+
     const terminal = vscode.window.createTerminal({
       name: TERMINAL_NAME,
-      iconPath: {
-        light: vscode.Uri.file(ctx.asAbsolutePath("images/button-dark.svg")),
-        dark: vscode.Uri.file(ctx.asAbsolutePath("images/button-light.svg")),
-      },
+      iconPath: vscode.Uri.file(ctx.asAbsolutePath("images/icon.png")),
+      cwd: workspaceDir,
       location: {
         viewColumn: vscode.ViewColumn.Beside,
         preserveFocus: false,
       },
-      env: {
-        _EXTENSION_OPENCODE_PORT: port.toString(),
-        OPENCODE_CALLER: "vscode",
-        OPENCODE_CONFIG: configPath,
-        OPENCODE_MANTHAN_MODE: "1",
-        MANTHAN_API_KEY: settings.apiKey || process.env.MANTHAN_API_KEY || "",
-      },
+      env,
     })
 
     terminal.show()
-    const bin = settings.binary.includes(" ") ? `"${settings.binary}"` : settings.binary
-    terminal.sendText(`${bin} --port ${port}`)
+    terminal.sendText(manthanCliCommand(settings.binary, port, workspaceDir))
 
     const fileRef = getActiveFile()
     let tries = 15
@@ -190,6 +179,15 @@ export function activate(context: vscode.ExtensionContext) {
     })
   }
 
+  function getWorkspaceDirectory(): string | undefined {
+    const active = vscode.window.activeTextEditor?.document.uri
+    if (active && active.scheme === "file") {
+      const wf = vscode.workspace.getWorkspaceFolder(active)
+      if (wf) return wf.uri.fsPath
+    }
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+  }
+
   function getActiveFile() {
     const activeEditor = vscode.window.activeTextEditor
     if (!activeEditor) return
@@ -222,10 +220,13 @@ const MANTHAN_ONEPAGER = `# Manthan × OpenCode (VS Code)
 
 ## Commands
 
-- **Open Manthan** — launches CLI with Manthan provider defaults
-- **Manthan: Health check** — \`GET /v1/models\`
+- **Open Manthan** — runs \`manthan.binary\` against your global \`~/.config/opencode/opencode.jsonc\`
+- **Manthan: Health check** — \`GET /v1/models\` (uses \`manthan.baseUrl\` / key only for this probe)
 - **Manthan: Condense context** — sends \`/compact\` → \`x-manthan-compact\`
-- **Manthan: Open settings** — URL, API key, model
+
+## Config
+
+Edit **\`~/.config/opencode/opencode.jsonc\`** for base URL, API key, models, compaction. VS Code \`manthan.binary\` is the only launch setting that matters day-to-day.
 
 ## Context bar
 

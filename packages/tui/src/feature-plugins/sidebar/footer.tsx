@@ -1,7 +1,7 @@
+import nodePath from "path"
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, Show } from "solid-js"
-import { abbreviateHome } from "../../runtime"
 import { useTuiPaths } from "../../context/runtime"
 
 const id = "internal:sidebar-footer"
@@ -16,17 +16,12 @@ function View(props: { api: TuiPluginApi; sessionID: string }) {
   )
   const done = createMemo(() => props.api.kv.get("dismissed_getting_started", false))
   const show = createMemo(() => !has() && !done())
-  const path = createMemo(() => {
+  const folder = createMemo(() => {
     const session = props.api.state.session.get(props.sessionID)
     const dir = session?.directory || props.api.state.path.directory || paths.cwd
-    const out = abbreviateHome(dir, paths.home)
+    const name = nodePath.basename(dir.replace(/[\\/]+$/, "") || dir) || dir
     const branch = session?.directory === props.api.state.path.directory ? props.api.state.vcs?.branch : undefined
-    const text = branch ? out + ":" + branch : out
-    const list = text.split("/")
-    return {
-      parent: list.slice(0, -1).join("/"),
-      name: list.at(-1) ?? "",
-    }
+    return branch ? `${name}:${branch}` : name
   })
 
   return (
@@ -64,10 +59,7 @@ function View(props: { api: TuiPluginApi; sessionID: string }) {
           </box>
         </box>
       </Show>
-      <text>
-        <span style={{ fg: theme().textMuted }}>{path().parent}/</span>
-        <span style={{ fg: theme().text }}>{path().name}</span>
-      </text>
+      <text fg={theme().text}>{folder()}</text>
       <text fg={theme().textMuted}>
         <span style={{ fg: theme().success }}>•</span> <b>Open</b>
         <span style={{ fg: theme().text }}>

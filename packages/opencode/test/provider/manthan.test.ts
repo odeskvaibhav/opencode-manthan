@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import {
+  applyManthanModelPolicies,
   applyManthanOptionA,
   clearManthanCompactQueue,
   clearManthanContextStore,
@@ -8,10 +9,12 @@ import {
   formatManthanContextLabel,
   isManthanConfig,
   isManthanProviderID,
+  manthanReasoningEffort,
   manthanSessionHeaders,
   parseManthanContextHeaders,
   rememberManthanContext,
   requestManthanCompact,
+  sessionIDFromFetch,
   sessionIDFromRequestHeaders,
   takeManthanContext,
 } from "../../src/provider/manthan"
@@ -91,11 +94,28 @@ describe("manthan Option A", () => {
     expect(h["x-manthan-client"]).toBe("opencode")
   })
 
+  test("applyManthanModelPolicies overlays /v1/models window + compact %", () => {
+    const models = {
+      "laguna-xs-2.1-sharded": {
+        id: "laguna-xs-2.1-sharded",
+        limit: { context: 65536 },
+        options: { temperature: 0.1 },
+      },
+    }
+    const policies = new Map([
+      ["laguna-xs-2.1-sharded", { context_limit: 10000, compaction_threshold: 50 }],
+    ])
+    expect(applyManthanModelPolicies(models, policies)).toBe(1)
+    expect(models["laguna-xs-2.1-sharded"].limit.context).toBe(10000)
+    expect(models["laguna-xs-2.1-sharded"].options?.compaction_threshold).toBe(50)
+  })
+
   test("parseManthanContextHeaders reads context bar fields", () => {
     const usage = parseManthanContextHeaders({
       "x-manthan-context-limit": "65536",
       "x-manthan-context-used": "12345",
       "x-manthan-context-usage-percent": "42.5",
+      "x-manthan-compaction-threshold": "96",
       "x-manthan-compaction-status": "compacted",
       "x-manthan-cache-epoch": "3",
       "x-manthan-newly-evaluated-tokens": "800",
@@ -104,9 +124,10 @@ describe("manthan Option A", () => {
     expect(usage!.context_limit).toBe(65536)
     expect(usage!.context_used).toBe(12345)
     expect(usage!.context_usage_percent).toBe(42.5)
+    expect(usage!.compaction_threshold).toBe(96)
     expect(usage!.compaction_status).toBe("compacted")
     expect(usage!.cache_epoch).toBe(3)
-    expect(formatManthanContextLabel(usage!)).toBe("12,345 (43%)")
+    expect(formatManthanContextLabel(usage!)).toBe("12,345 / 65,536 · 43% · compact@96%")
   })
 
   test("parseManthanContextHeaders returns null without Manthan headers", () => {
@@ -132,6 +153,18 @@ describe("manthan Option A", () => {
     ).toBe("ses_a")
   })
 
+  test("sessionIDFromFetch reads Request and response headers", () => {
+    const req = new Request("http://127.0.0.1/v1/chat/completions", {
+      headers: { "x-opencode-session-id": "ses_req" },
+    })
+    expect(sessionIDFromFetch({ request: req })).toBe("ses_req")
+    expect(
+      sessionIDFromFetch({
+        response: new Headers({ "x-session-id": "ses_res" }),
+      }),
+    ).toBe("ses_res")
+  })
+
   test("request/consume Manthan compact is one-shot", () => {
     requestManthanCompact("ses_c")
     expect(consumeManthanCompact("ses_c")).toBe(true)
@@ -140,5 +173,26 @@ describe("manthan Option A", () => {
 
   test("manthanSessionHeaders brands X-Title as Manthan", () => {
     expect(manthanSessionHeaders("ses_x")["X-Title"]).toBe("Manthan")
+  })
+
+  test("manthanReasoningEffort prefers agent medium over missing user variant", () => {
+    expect(
+      manthanReasoningEffort({
+        agent: { variant: "medium", options: { reasoningEffort: "medium" } },
+      }),
+    ).toBe("medium")
+  })
+
+  test("manthanReasoningEffort uses explicit user variant", () => {
+    expect(
+      manthanReasoningEffort({
+        userVariant: "low",
+        agent: { variant: "medium" },
+      }),
+    ).toBe("low")
+  })
+
+  test("manthanReasoningEffort defaults to medium when unset", () => {
+    expect(manthanReasoningEffort({})).toBe("medium")
   })
 })

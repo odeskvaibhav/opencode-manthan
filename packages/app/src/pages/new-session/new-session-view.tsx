@@ -16,11 +16,14 @@ import {
 } from "@/components/prompt-project-selector"
 import { StatusPopoverV2 } from "@/components/status-popover"
 import { useLanguage } from "@/context/language"
+import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useProviders } from "@/hooks/use-providers"
 import { NEW_SESSION_CONTENT_WIDTH } from "@/pages/session/new-session-layout"
 import { Persist, persisted } from "@/utils/persist"
+import { Splash } from "@opencode-ai/ui/logo"
+import { useManthanChatWarmup } from "./manthan-chat-warmup"
 import type { NewSessionDraftController } from "./new-session-draft-controller"
 import type { NewSessionWorkspaceController } from "./new-session-workspace-controller"
 
@@ -31,6 +34,12 @@ export function NewSessionView(props: {
   project: PromptProjectController
   workspace: NewSessionWorkspaceController
 }) {
+  const prompt = usePrompt()
+  const warmup = useManthanChatWarmup({
+    controller: props.input,
+    promptReady: prompt.ready,
+  })
+
   return (
     <div class="@container relative flex flex-col min-h-0 h-full flex-1">
       <div
@@ -39,9 +48,9 @@ export function NewSessionView(props: {
       >
         <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
           <div class={NEW_SESSION_CONTENT_WIDTH}>
-            <WordmarkV2 class="h-auto w-full text-v2-background-bg-inverse" />
+            <WordmarkV2 class="mx-auto h-auto w-[clamp(11rem,42vw,20rem)]" />
             <div class="mt-8 flex flex-col gap-8">
-              <PromptInputV2Composer controller={props.input} />
+              <PromptInputV2Composer controller={props.input} disabled={warmup.disabled()} />
               <Show when={props.project.empty()}>
                 <PromptProjectAddButton controller={props.project} />
               </Show>
@@ -68,6 +77,19 @@ export function NewSessionView(props: {
             </div>
           </div>
         </div>
+        <Show when={warmup.active()}>
+          <div
+            class="absolute inset-0 z-20 flex items-center justify-center bg-v2-background-bg-deep/85 backdrop-blur-[2px]"
+            data-component="manthan-chat-warmup"
+          >
+            <div class="flex flex-col items-center gap-4 px-6 text-center">
+              <Splash class="w-[clamp(10rem,38vw,18rem)]" />
+              <div class="max-w-md text-sm text-v2-text-text-muted">
+                {warmup.line() || warmup.label()}
+              </div>
+            </div>
+          </div>
+        </Show>
         <ProviderTip />
       </div>
     </div>

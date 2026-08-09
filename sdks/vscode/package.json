@@ -2,7 +2,7 @@
   "name": "manthan-opencode",
   "displayName": "Manthan",
   "description": "Manthan-first OpenCode for VS Code — Manthan owns context compaction (Option A)",
-  "version": "1.18.15",
+  "version": "1.18.19",
   "publisher": "manthan",
   "repository": {
     "type": "git",
@@ -32,22 +32,22 @@
         "manthan.baseUrl": {
           "type": "string",
           "default": "http://127.0.0.1:3000/v1",
-          "description": "Manthan OpenAI-compatible API base URL (…/v1)"
+          "description": "Only for Manthan: Health check. Runtime provider URL lives in ~/.config/opencode/opencode.jsonc"
         },
         "manthan.apiKey": {
           "type": "string",
           "default": "",
-          "description": "Manthan API key (or set MANTHAN_API_KEY env)"
+          "description": "Only for Manthan: Health check (optional). Prefer apiKey in ~/.config/opencode/opencode.jsonc"
         },
         "manthan.model": {
           "type": "string",
           "default": "manthan/laguna-xs-2.1-sharded",
-          "description": "Default Manthan model id"
+          "description": "Unused at launch — set model in ~/.config/opencode/opencode.jsonc"
         },
         "manthan.binary": {
           "type": "string",
           "default": "opencode",
-          "description": "OpenCode / Manthan CLI binary on PATH (or absolute path)"
+          "description": "CLI to run on Cmd+Esc (fork wrapper path). Config comes from ~/.config/opencode/opencode.jsonc"
         },
         "manthan.showPowerFields": {
           "type": "boolean",
@@ -61,16 +61,16 @@
         "command": "opencode.openTerminal",
         "title": "Manthan: Open",
         "icon": {
-          "light": "images/button-dark.svg",
-          "dark": "images/button-light.svg"
+          "light": "images/icon.png",
+          "dark": "images/icon.png"
         }
       },
       {
         "command": "opencode.openNewTerminal",
         "title": "Manthan: Open in new tab",
         "icon": {
-          "light": "images/button-dark.svg",
-          "dark": "images/button-light.svg"
+          "light": "images/icon.png",
+          "dark": "images/icon.png"
         }
       },
       {
@@ -135,6 +135,9 @@
     "watch:esbuild": "node esbuild.js --watch",
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
     "package": "bun run check-types && bun run lint && node esbuild.js --production",
+    "vsix": "bun run check-types && node esbuild.js --production && node ../../scripts/package-vscode-vsix.mjs",
+    "install:code": "bash ../../scripts/install-vscode.sh",
+    "install:code:dev": "bash ../../scripts/install-vscode.sh --dev",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "bun run compile-tests && bun run compile && bun run lint",

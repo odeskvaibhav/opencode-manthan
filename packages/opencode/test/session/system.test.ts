@@ -90,6 +90,15 @@ describe("session.system", () => {
     )
   })
 
+  test("selects Manthan identity prompt for Manthan provider", () => {
+    const text = SystemPrompt.provider({
+      providerID: "manthan",
+      api: { id: "laguna-xs-2.1-sharded" },
+    } as Provider.Model)[0]
+    expect(text).toContain("You are Manthan")
+    expect(text).not.toMatch(/^You are opencode/i)
+  })
+
   it.effect("skills output is sorted by name and stable across calls", () =>
     Effect.gen(function* () {
       const prompt = yield* SystemPrompt.Service

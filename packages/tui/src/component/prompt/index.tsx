@@ -39,7 +39,12 @@ import { type AutocompleteRef, Autocomplete } from "./autocomplete"
 import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { AssistantMessage, FilePart, UserMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
-import { formatManthanContextLabel, manthanContextFromMetadata } from "../../util/manthan-context"
+import {
+  compactAtFromModel,
+  formatContextBar,
+  formatManthanContextLabel,
+  manthanContextFromMetadata,
+} from "../../util/manthan-context"
 import { errorMessage } from "../../util/error"
 import { formatDuration } from "../../util/format"
 import { createColors, createFrames } from "../../ui/spinner"
@@ -290,9 +295,14 @@ export function Prompt(props: PromptProps) {
     if (tokens <= 0) return
 
     const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
-    const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
+    const limit = model?.limit.context ?? null
     return {
-      context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
+      context: formatContextBar({
+        used: tokens,
+        limit,
+        percent: limit ? Math.round((tokens / limit) * 100) : null,
+        compactAt: compactAtFromModel(model),
+      }),
       cost: costLabel,
     }
   })
@@ -342,7 +352,7 @@ export function Prompt(props: PromptProps) {
         if (!args.agent) local.agent.set(msg.agent)
         if (msg.model) {
           local.model.set(msg.model)
-          local.model.variant.set(msg.model.variant)
+          local.model.variant.set(msg.model.variant ?? local.agent.current()?.variant)
         }
       }
     }
@@ -1662,7 +1672,9 @@ export function Prompt(props: PromptProps) {
               {props.hint ?? (
                 <Show when={props.sessionID}>
                   <box marginLeft={1}>
-                    <text fg={theme.textMuted}>{location()?.directory ?? paths.cwd}</text>
+                    <text fg={theme.textMuted}>
+                      {path.basename(location()?.directory ?? paths.cwd)}
+                    </text>
                   </box>
                 </Show>
               )}

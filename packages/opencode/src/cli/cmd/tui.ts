@@ -63,9 +63,17 @@ async function input(value?: string) {
   return piped + "\n" + value
 }
 
-export function resolveThreadDirectory(project?: string, envPWD = process.env.PWD, cwd = process.cwd()) {
-  const root = Filesystem.resolve(envPWD ?? cwd)
+export function resolveThreadDirectory(
+  project?: string,
+  envPWD = process.env.PWD,
+  cwd = process.cwd(),
+  launchCwd = process.env.OPENCODE_LAUNCH_CWD,
+) {
+  const invoker = launchCwd || envPWD
+  const root = Filesystem.resolve(invoker ?? cwd)
   if (project) return Filesystem.resolve(path.isAbsolute(project) ? project : path.join(root, project))
+  // Wrapper `cd`s into the fork + bun --cwd packages/opencode; keep invoker dir.
+  if (launchCwd) return Filesystem.resolve(launchCwd)
   return Filesystem.resolve(cwd)
 }
 

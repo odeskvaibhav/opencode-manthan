@@ -125,31 +125,23 @@ export default defineConfig({
           dir: "ltr",
         },
       },
-      favicon: "/favicon-v3.svg",
+      favicon: "/favicon-base-256px.png",
       head: [
         {
           tag: "link",
           attrs: {
             rel: "icon",
-            href: "/favicon-v3.ico",
-            sizes: "32x32",
-          },
-        },
-        {
-          tag: "link",
-          attrs: {
-            rel: "icon",
             type: "image/png",
-            href: "/favicon-96x96-v3.png",
-            sizes: "96x96",
+            href: "/favicon-base-256px.png",
+            sizes: "256x256",
           },
         },
         {
           tag: "link",
           attrs: {
             rel: "apple-touch-icon",
-            href: "/apple-touch-icon-v3.png",
-            sizes: "180x180",
+            href: "/favicon-base-256px.png",
+            sizes: "256x256",
           },
         },
       ],

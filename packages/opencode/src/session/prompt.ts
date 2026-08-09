@@ -9,6 +9,7 @@ import { SessionRevert } from "./revert"
 import { Session } from "./session"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
+import { isManthanProviderID } from "@/provider/manthan"
 
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
@@ -212,6 +213,27 @@ const layer = Layer.effect(
 
       const subtasks = firstUser.parts.filter((p): p is SessionV1.SubtaskPart => p.type === "subtask")
       const onlySubtasks = subtasks.length > 0 && firstUser.parts.every((p) => p.type === "subtask")
+
+      // Manthan is typically 1 llama slot. OpenCode forks title gen alongside the
+      // real first turn; that tiny tools={} job gets client-cancelled and spams
+      // abort/stop logs (and can bump cache epoch). Use a local title instead.
+      if (isManthanProviderID(input.providerID)) {
+        const local = onlySubtasks
+          ? subtasks.map((p) => p.prompt).join(" ").trim()
+          : firstUser.parts
+              .filter((p): p is SessionV1.TextPart => p.type === "text")
+              .map((p) => p.text)
+              .join(" ")
+              .trim()
+        if (!local) return
+        const t = local.length > 100 ? local.substring(0, 97) + "..." : local
+        yield* sessions
+          .setTitle({ sessionID: input.session.id, title: t })
+          .pipe(
+            Effect.catchCause((cause) => Effect.logError("failed to set manthan title", { error: Cause.squash(cause) })),
+          )
+        return
+      }
 
       const ag = yield* agents.get("title")
       if (!ag) return
@@ -644,14 +666,9 @@ const layer = Layer.effect(
       }
 
       const model = input.model ?? ag.model ?? (yield* currentModel(input.sessionID))
-      const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
-      const full =
-        !input.variant && ag.variant && same
-          ? yield* provider
-              .getModel(model.providerID, model.modelID)
-              .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
-          : undefined
-      const variant = input.variant ?? (ag.variant && full?.variants?.[ag.variant] ? ag.variant : undefined)
+      const requestedVariant = input.variant && input.variant !== "default" ? input.variant : undefined
+      const agentVariant = ag.variant && ag.variant !== "default" ? ag.variant : undefined
+      const variant = requestedVariant ?? agentVariant
 
       const info: SessionV1.User = {
         id: input.messageID ?? MessageID.ascending(),

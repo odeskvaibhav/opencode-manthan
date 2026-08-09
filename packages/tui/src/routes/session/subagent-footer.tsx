@@ -5,6 +5,12 @@ import { useTheme } from "../../context/theme"
 import { SplitBorder } from "../../ui/border"
 import type { AssistantMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
+import {
+  compactAtFromModel,
+  formatContextBar,
+  formatManthanContextLabel,
+  manthanContextFromMetadata,
+} from "../../util/manthan-context"
 import { useTerminalDimensions } from "@opentui/solid"
 import { useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 
@@ -31,6 +37,22 @@ export function SubagentFooter() {
   })
 
   const usage = createMemo(() => {
+    const cost = session()?.cost ?? 0
+    const money = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+    })
+    const costLabel = cost > 0 ? money.format(cost) : undefined
+
+    const manthanUsage = manthanContextFromMetadata(session()?.metadata as Record<string, unknown> | undefined)
+    const manthanLabel = manthanUsage ? formatManthanContextLabel(manthanUsage) : undefined
+    if (manthanLabel) {
+      const status = manthanUsage?.compaction_status
+      const chip =
+        status && status !== "ok" && status !== "none" && status !== "normal" ? ` · ${status}` : ""
+      return { context: `${manthanLabel}${chip}`, cost: costLabel }
+    }
+
     const msg = messages()
     const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
     if (!last) return
@@ -40,17 +62,15 @@ export function SubagentFooter() {
     if (tokens <= 0) return
 
     const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
-    const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
-    const cost = session()?.cost ?? 0
-
-    const money = new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    })
-
+    const limit = model?.limit.context ?? null
     return {
-      context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
-      cost: cost > 0 ? money.format(cost) : undefined,
+      context: formatContextBar({
+        used: tokens,
+        limit,
+        percent: limit ? Math.round((tokens / limit) * 100) : null,
+        compactAt: compactAtFromModel(model),
+      }),
+      cost: costLabel,
     }
   })
 

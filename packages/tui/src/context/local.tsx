@@ -133,6 +133,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     }
 
     const agent = createAgent()
+    /** `"unset"` = follow agent config; otherwise in-session cycle/set. */
+    let variantSessionChoice: string | undefined | "unset" = "unset"
 
     function createModel() {
       const [modelStore, setModelStore] = createStore<{
@@ -367,10 +369,19 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             return modelStore.variant[key]
           },
           current() {
-            const v = this.selected()
-            if (!v) return undefined
-            if (!this.list().includes(v)) return undefined
-            return v
+            const list = this.list()
+            const inList = (v: string | undefined) =>
+              !!v && v !== "default" && (list.length === 0 || list.includes(v))
+            // In-session cycle/set wins; otherwise agent config (medium), not disk `low`.
+            if (variantSessionChoice !== "unset") {
+              if (!variantSessionChoice || variantSessionChoice === "default") return undefined
+              if (inList(variantSessionChoice)) return variantSessionChoice
+            }
+            const agentVariant = agent.current()?.variant
+            if (inList(agentVariant)) return agentVariant
+            const stored = this.selected()
+            if (inList(stored)) return stored
+            return undefined
           },
           list() {
             const m = currentModel()
@@ -380,9 +391,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             if (!info?.variants) return []
             return Object.keys(info.variants)
           },
+          /** New chat / home: drop in-session override so agent.variant applies. */
+          useAgentDefault() {
+            variantSessionChoice = "unset"
+          },
           set(value: string | undefined) {
             const m = currentModel()
             if (!m) return
+            variantSessionChoice = value ?? undefined
             const key = `${m.providerID}/${m.modelID}`
             setModelStore("variant", key, value ?? "default")
             save()

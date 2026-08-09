@@ -1,3 +1,10 @@
+/** Shell command: fork binary + port, optionally pinned to a workspace folder. */
+export function manthanCliCommand(binary: string, port: number, directory?: string): string {
+  const bin = binary.includes(" ") ? `"${binary}"` : binary
+  if (!directory) return `${bin} --port ${port}`
+  return `${bin} --port ${port} ${JSON.stringify(directory)}`
+}
+
 export type ManthanSettings = {
   baseUrl: string
   apiKey: string
@@ -54,7 +61,9 @@ export function buildManthanConfigContent(settings: ManthanSettings): string {
 
 export type ManthanContextSnap = {
   used: number | null
+  limit: number | null
   percent: number | null
+  compactAt: number | null
   status: string | null
   fresh: number | null
   reuse: number | null
@@ -64,7 +73,9 @@ export type ManthanContextSnap = {
 export function formatStatusBar(snap: ManthanContextSnap, power: boolean): string {
   const pct = snap.percent != null ? `${Math.round(snap.percent)}%` : "?"
   const used = snap.used != null ? Math.round(snap.used).toLocaleString("en-US") : "?"
-  let text = `Manthan ${used} (${pct})`
+  const limit = snap.limit != null && snap.limit > 0 ? Math.round(snap.limit).toLocaleString("en-US") : null
+  let text = limit ? `Manthan ${used} / ${limit} (${pct})` : `Manthan ${used} (${pct})`
+  if (snap.compactAt != null) text += ` · compact@${Math.round(snap.compactAt)}%`
   if (snap.status && !["ok", "none", "normal"].includes(snap.status)) text += ` · ${snap.status}`
   if (power) {
     if (snap.fresh != null) text += ` · fresh ${Math.round(snap.fresh)}`
@@ -88,7 +99,9 @@ export function parseSessionListForManthan(sessions: unknown): ManthanContextSna
     if (!m) continue
     return {
       used: typeof m.context_used === "number" ? m.context_used : null,
+      limit: typeof m.context_limit === "number" ? m.context_limit : null,
       percent: typeof m.context_usage_percent === "number" ? m.context_usage_percent : null,
+      compactAt: typeof m.compaction_threshold === "number" ? m.compaction_threshold : null,
       status: typeof m.compaction_status === "string" ? m.compaction_status : null,
       fresh: typeof m.newly_evaluated_tokens === "number" ? m.newly_evaluated_tokens : null,
       reuse: typeof m.cache_reuse_percent === "number" ? m.cache_reuse_percent : null,

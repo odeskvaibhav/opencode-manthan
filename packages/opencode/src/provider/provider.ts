@@ -31,6 +31,7 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
+import { applyManthanModelPolicies, fetchManthanModelPolicies, isManthanProviderID } from "./manthan"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 300_000
 
@@ -1608,6 +1609,25 @@ const layer = Layer.effect(
           })
         }
 
+        yield* Effect.promise(async () => {
+          for (const [id, provider] of Object.entries(providers)) {
+            if (!isManthanProviderID(id)) continue
+            const opts = provider.options ?? {}
+            const baseURL = typeof opts.baseURL === "string" ? opts.baseURL : ""
+            if (!baseURL) continue
+            try {
+              const policies = await fetchManthanModelPolicies({
+                baseURL,
+                apiKey: typeof opts.apiKey === "string" ? opts.apiKey : provider.key,
+                headers: (opts.headers as Record<string, string> | undefined) ?? undefined,
+              })
+              applyManthanModelPolicies(provider.models, policies)
+            } catch {
+              // keep config limits if /v1/models is unreachable
+            }
+          }
+        })
+
         for (const [id, provider] of Object.entries(providers)) {
           const providerID = ProviderV2.ID.make(id)
           if (!isProviderAllowed(providerID)) {
@@ -1764,25 +1784,44 @@ const layer = Layer.effect(
           }).finally(() => headerTimeoutCtl?.clear())
 
           // Phase 2: capture Manthan context headers before the SSE body is consumed.
+          // Also tee SSE for live prefill % comments (New Chat warmup loader).
+          let outRes = res
           try {
             const {
               parseManthanContextHeaders,
               rememberManthanContext,
-              sessionIDFromRequestHeaders,
+              sessionIDFromFetch,
+              teeManthanProgressResponse,
+              manthanSessionProgressUrl,
+              startManthanProgressPoll,
+              isManthanProviderID,
             } = await import("./manthan")
             const usage = parseManthanContextHeaders(res.headers)
-            if (usage) {
-              const sessionID = sessionIDFromRequestHeaders(
-                opts.headers as Headers | Record<string, string> | undefined,
-              )
-              if (sessionID) rememberManthanContext(sessionID, usage)
+            const sessionID = sessionIDFromFetch({
+              request: input,
+              initHeaders: opts.headers as Headers | Record<string, string> | undefined,
+              response: res,
+            })
+            if (usage && sessionID) rememberManthanContext(sessionID, usage)
+            if (sessionID && isManthanProviderID(model.providerID)) {
+              outRes = teeManthanProgressResponse(res, sessionID)
+              const chatUrl = String(input instanceof Request ? input.url : input)
+              const progressUrl = manthanSessionProgressUrl(chatUrl, sessionID)
+              if (progressUrl) {
+                startManthanProgressPoll({
+                  sessionID,
+                  url: progressUrl,
+                  headers: opts.headers as Headers | Record<string, string> | undefined,
+                  signal: opts.signal,
+                })
+              }
             }
           } catch {
             // ignore — never break provider fetch on telemetry
           }
 
-          if (!chunkAbortCtl) return res
-          return wrapSSE(res, chunkTimeout, chunkAbortCtl)
+          if (!chunkAbortCtl) return outRes
+          return wrapSSE(outRes, chunkTimeout, chunkAbortCtl)
         }
 
         const bundledLoader = BUNDLED_PROVIDERS[model.api.npm]

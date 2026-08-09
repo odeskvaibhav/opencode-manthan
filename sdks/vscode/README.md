@@ -2,15 +2,38 @@
 
 Manthan-branded OpenCode launcher. **Option A:** Manthan owns model-facing digests and compaction; OpenCode auto-compact stays off.
 
+## Ship & install (local)
+
+From repo root — this is the durable loop:
+
+```bash
+# Build VSIX → install into VS Code (Cmd+Esc after Reload Window)
+./scripts/install-vscode.sh
+
+# Same, and remove stock OpenCode (same command IDs — keep only one)
+./scripts/install-vscode.sh --replace-stock
+
+# Dev loop: symlink source tree (edit → Reload Window, no VSIX)
+./scripts/install-vscode.sh --dev
+```
+
+Or from `sdks/vscode`:
+
+```bash
+bun run install:code        # VSIX + code --install-extension
+bun run install:code:dev    # symlink
+bun run vsix                # package only → manthan-opencode-<ver>.vsix
+```
+
+Packaging does **not** use `vsce` (broken iconv extract here); `scripts/package-vscode-vsix.mjs` zips a valid VSIX.
+
+The install script sets `manthan.binary` to `scripts/opencode-manthan.sh` (fork CLI, not Homebrew).
+
 ## Setup
 
-1. Install this extension (local VSIX or `F5` from `sdks/vscode`).
-2. Set **Manthan: Open settings**:
-   - `manthan.baseUrl` — e.g. `http://127.0.0.1:3000/v1`
-   - `manthan.apiKey` — or export `MANTHAN_API_KEY`
-   - `manthan.model` — default `manthan/laguna-xs-2.1-sharded`
-   - `manthan.binary` — OpenCode CLI built from this fork (`opencode` on PATH)
-3. Command Palette → **Manthan: Open**
+1. Put Manthan provider / model / key in **`~/.config/opencode/opencode.jsonc`** (source of truth).
+2. Run `./scripts/install-vscode.sh` once (or `--dev` while hacking) so `manthan.binary` points at the fork.
+3. **Reload Window**, then **Cmd+Esc** — launches the CLI with your global config only (no temp overlay).
 
 ## Option A (important)
 

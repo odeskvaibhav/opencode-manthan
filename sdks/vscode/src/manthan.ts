@@ -5,13 +5,14 @@ import * as path from "path"
 import {
   buildManthanConfigContent,
   formatStatusBar,
+  manthanCliCommand,
   parseSessionListForManthan,
   type ManthanContextSnap,
   type ManthanSettings,
 } from "./manthan-config"
 
 export type { ManthanContextSnap, ManthanSettings }
-export { buildManthanConfigContent, formatStatusBar }
+export { buildManthanConfigContent, formatStatusBar, manthanCliCommand }
 
 export function readManthanSettings(): ManthanSettings {
   const cfg = vscode.workspace.getConfiguration("manthan")

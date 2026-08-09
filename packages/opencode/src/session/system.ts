@@ -10,6 +10,7 @@ import PROMPT_GEMINI from "./prompt/gemini.txt"
 import PROMPT_GPT from "./prompt/gpt.txt"
 import PROMPT_KIMI from "./prompt/kimi.txt"
 import PROMPT_META from "./prompt/meta.txt"
+import PROMPT_MANTHAN from "./prompt/manthan.txt"
 
 import PROMPT_CODEX from "./prompt/codex.txt"
 import PROMPT_TRINITY from "./prompt/trinity.txt"
@@ -23,8 +24,13 @@ import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/l
 import { Reference } from "@opencode-ai/core/reference"
 import { MCP } from "@/mcp"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { isManthanProviderID } from "@/provider/manthan"
 
 export function provider(model: Provider.Model) {
+  // Manthan provider always uses Manthan identity (before model-id specialty prompts).
+  if (isManthanProviderID(model.providerID) || isManthanProviderID(model.api.id)) {
+    return [PROMPT_MANTHAN]
+  }
   if (model.api.id.includes("muse-spark")) return [PROMPT_META]
   if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
     return [PROMPT_BEAST]

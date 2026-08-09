@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { buildManthanConfigContent, formatStatusBar, parseSessionListForManthan } from "./manthan-config"
+import { buildManthanConfigContent, formatStatusBar, manthanCliCommand, parseSessionListForManthan } from "./manthan-config"
 
 describe("vscode manthan helpers", () => {
+  test("manthanCliCommand pins workspace directory", () => {
+    expect(manthanCliCommand("manthan", 4096)).toBe("manthan --port 4096")
+    expect(manthanCliCommand("manthan", 4096, "/Users/me/app")).toBe('manthan --port 4096 "/Users/me/app"')
+    expect(manthanCliCommand("/tmp/my bin/manthan", 1, "/tmp/work space")).toBe(
+      `"/tmp/my bin/manthan" --port 1 "/tmp/work space"`,
+    )
+  })
+
   test("buildManthanConfigContent forces Option A compaction off", () => {
     const raw = buildManthanConfigContent({
       baseUrl: "http://127.0.0.1:3000/v1",
@@ -22,13 +30,16 @@ describe("vscode manthan helpers", () => {
   test("formatStatusBar includes power fields when enabled", () => {
     const snap = {
       used: 12000,
+      limit: 8192,
       percent: 50,
+      compactAt: 40,
       status: "compacted",
       fresh: 800,
       reuse: 70,
       epoch: 2,
     }
-    expect(formatStatusBar(snap, false)).toContain("12,000 (50%)")
+    expect(formatStatusBar(snap, false)).toContain("12,000 / 8,192 (50%)")
+    expect(formatStatusBar(snap, false)).toContain("compact@40%")
     expect(formatStatusBar(snap, false)).toContain("compacted")
     expect(formatStatusBar(snap, true)).toContain("fresh 800")
     expect(formatStatusBar(snap, true)).toContain("reuse 70%")
@@ -40,10 +51,19 @@ describe("vscode manthan helpers", () => {
       { time: { updated: 1 }, metadata: {} },
       {
         time: { updated: 9 },
-        metadata: { manthan: { context_used: 99, context_usage_percent: 12 } },
+        metadata: {
+          manthan: {
+            context_used: 99,
+            context_limit: 8192,
+            context_usage_percent: 12,
+            compaction_threshold: 40,
+          },
+        },
       },
     ])
     expect(snap?.used).toBe(99)
+    expect(snap?.limit).toBe(8192)
     expect(snap?.percent).toBe(12)
+    expect(snap?.compactAt).toBe(40)
   })
 })

@@ -18,6 +18,7 @@ import {
   consumeManthanCompact,
   ensureManthanClientHeaders,
   isManthanProviderID,
+  manthanReasoningEffort,
   manthanSessionHeaders,
 } from "@/provider/manthan"
 
@@ -95,6 +96,18 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         providerOptions: input.provider.options,
       })
   const options = mergeOptions(mergeOptions(mergeOptions(base, input.model.options), input.agent.options), variant)
+  const manthanEffort = isManthanProviderID(input.model.providerID)
+    ? manthanReasoningEffort({
+        userVariant: input.user.model.variant,
+        agent: input.agent,
+        options,
+        variant,
+      })
+    : undefined
+  if (manthanEffort) {
+    if (options.reasoning_effort == null) options.reasoning_effort = manthanEffort
+    if (options.reasoningEffort == null) options.reasoningEffort = manthanEffort
+  }
   if (
     input.model.api.npm === "@ai-sdk/azure" &&
     (input.provider.options.useCompletionUrls || input.model.options.useCompletionUrls || options.useCompletionUrls)
@@ -220,6 +233,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         ...compactHeader,
         ...input.model.headers,
         ...headers,
+        ...(manthanEffort ? { "X-Manthan-Reasoning-Effort": manthanEffort } : {}),
       },
       input.model.providerID,
     ),
