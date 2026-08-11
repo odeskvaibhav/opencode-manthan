@@ -22,7 +22,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { buildPrompt } from "@opencode-ai/core/session/compaction"
 import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
-import { isManthanProviderID, manthanClientCompactAllowed } from "@/provider/manthan"
+import { isManthanProviderID, manthanClientCompactAllowed, MANTHAN_COMPACT_CONTINUE_TEXT } from "@/provider/manthan"
 
 export const Event = SessionCompactionEvent
 
@@ -335,6 +335,12 @@ const layer = Layer.effect(
         throw new Error(`Compaction parent must be a user message: ${input.parentID}`)
       }
       const userMessage = parent.info
+      if (isManthanProviderID(userMessage.model.providerID) && !manthanClientCompactAllowed()) {
+        yield* Effect.logInfo(
+          "skipping OpenCode compaction.process for Manthan provider (Option A)",
+        )
+        return "continue" as const
+      }
       const compactionPart = parent.parts.find((part): part is SessionV1.CompactionPart => part.type === "compaction")
 
       let messages = input.messages
@@ -521,8 +527,7 @@ const layer = Layer.effect(
             const text =
               (input.overflow
                 ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
-                : "") +
-              "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
+                : "") + MANTHAN_COMPACT_CONTINUE_TEXT
             yield* session.updatePart({
               id: PartID.ascending(),
               messageID: continueMsg.id,

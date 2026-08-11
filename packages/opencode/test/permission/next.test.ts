@@ -540,6 +540,24 @@ test("disabled - wildcard permission denies all tools", () => {
   expect(result.has("read")).toBe(true)
 })
 
+test("disabled - invalid sentinel stays available under wildcard deny (explore repair path)", () => {
+  const result = Permission.disabled(
+    ["bash", "read", "invalid", "edit"],
+    [
+      { permission: "*", pattern: "*", action: "deny" },
+      { permission: "bash", pattern: "*", action: "allow" },
+      { permission: "read", pattern: "*", action: "allow" },
+      { permission: "grep", pattern: "*", action: "allow" },
+      { permission: "glob", pattern: "*", action: "allow" },
+      { permission: "webfetch", pattern: "*", action: "allow" },
+    ],
+  )
+  expect(result.has("bash")).toBe(false)
+  expect(result.has("read")).toBe(false)
+  expect(result.has("invalid")).toBe(false)
+  expect(result.has("edit")).toBe(true)
+})
+
 test("disabled - specific allow overrides wildcard deny", () => {
   const result = Permission.disabled(
     ["bash", "edit", "read"],

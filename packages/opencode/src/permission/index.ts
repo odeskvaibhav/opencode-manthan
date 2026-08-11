@@ -206,6 +206,10 @@ export function disabled(tools: string[], ruleset: PermissionV1.Ruleset): Set<st
   const reads = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]
   return new Set(
     tools.filter((tool) => {
+      // Internal sentinel used by experimental_repairToolCall — must stay executable
+      // even when the agent is `*: deny` (e.g. explore). Otherwise repair remaps to
+      // `invalid` and the AI SDK throws "unavailable tool 'invalid'".
+      if (tool === "invalid") return false
       const permission = edits.includes(tool) ? "edit" : reads.includes(tool) ? "read" : tool
       const rule = ruleset.findLast((rule) => Wildcard.match(permission, rule.permission))
       return rule?.pattern === "*" && rule.action === "deny"

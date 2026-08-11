@@ -339,12 +339,12 @@ export function make(input: {
   })
 
   const closeSession = Effect.fn("ACP.closeSession")(function* (params: CloseSessionRequest) {
+    const current = yield* session.tryGet(params.sessionId)
+    if (current) yield* abortBackingSession(current)
     const removed = yield* session.remove(params.sessionId)
     registeredMcp.delete(params.sessionId)
     sessionSnapshots.delete(params.sessionId)
     if (!removed) return {}
-
-    yield* abortBackingSession(removed)
     return {}
   })
 

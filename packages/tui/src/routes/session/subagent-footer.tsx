@@ -1,4 +1,4 @@
-import { createMemo, createSignal, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { useRouteData } from "../../context/route"
 import { useSync } from "../../context/sync"
 import { useTheme } from "../../context/theme"
@@ -10,6 +10,8 @@ import {
   formatContextBar,
   formatManthanContextLabel,
   manthanContextFromMetadata,
+  noteSharedCompactionThreshold,
+  subscribeSharedCompactionThreshold,
 } from "../../util/manthan-context"
 import { useTerminalDimensions } from "@opentui/solid"
 import { useCommandShortcut, useOpencodeKeymap } from "../../keymap"
@@ -19,6 +21,10 @@ export function SubagentFooter() {
   const sync = useSync()
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
   const session = createMemo(() => sync.session.get(route.sessionID))
+  const [compactEpoch, setCompactEpoch] = createSignal(0)
+  onMount(() => {
+    onCleanup(subscribeSharedCompactionThreshold(() => setCompactEpoch((n) => n + 1)))
+  })
 
   const subagentInfo = createMemo(() => {
     const s = session()
@@ -36,7 +42,18 @@ export function SubagentFooter() {
     return { label, index: index + 1, total: siblings.length }
   })
 
+  const manthanUsage = createMemo(() =>
+    manthanContextFromMetadata(session()?.metadata as Record<string, unknown> | undefined),
+  )
+  createEffect(() => {
+    for (const s of sync.data.session) {
+      const usage = manthanContextFromMetadata(s.metadata as Record<string, unknown> | undefined)
+      noteSharedCompactionThreshold(usage?.compaction_threshold, usage?.updated_at)
+    }
+  })
+
   const usage = createMemo(() => {
+    compactEpoch()
     const cost = session()?.cost ?? 0
     const money = new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -44,13 +61,10 @@ export function SubagentFooter() {
     })
     const costLabel = cost > 0 ? money.format(cost) : undefined
 
-    const manthanUsage = manthanContextFromMetadata(session()?.metadata as Record<string, unknown> | undefined)
-    const manthanLabel = manthanUsage ? formatManthanContextLabel(manthanUsage) : undefined
+    const current = manthanUsage()
+    const manthanLabel = current ? formatManthanContextLabel(current) : undefined
     if (manthanLabel) {
-      const status = manthanUsage?.compaction_status
-      const chip =
-        status && status !== "ok" && status !== "none" && status !== "normal" ? ` · ${status}` : ""
-      return { context: `${manthanLabel}${chip}`, cost: costLabel }
+      return { context: manthanLabel, cost: costLabel }
     }
 
     const msg = messages()

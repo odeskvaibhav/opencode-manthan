@@ -121,7 +121,7 @@ describe("run permission shared", () => {
     })
 
     expect(permissionInfo(req({ permission: "doom_loop" }))).toMatchObject({
-      title: "Continue after repeated failures",
+      title: "Repeated tool call with no progress",
     })
 
     expect(permissionInfo(req({ permission: "custom_tool" }))).toMatchObject({

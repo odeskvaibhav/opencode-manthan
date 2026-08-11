@@ -31,7 +31,10 @@ The install script sets `manthan.binary` to `scripts/opencode-manthan.sh` (fork 
 
 ## Setup
 
-1. Put Manthan provider / model / key in **`~/.config/opencode/opencode.jsonc`** (source of truth).
+Friend laptop (clone → config → extension): **[INSTALL.md](../../INSTALL.md)**.
+
+1. Copy example config: `./scripts/install-opencode-config.sh`  
+   → `~/.config/opencode/opencode.jsonc` (source of truth). Set `MANTHAN_API_KEY`.
 2. Run `./scripts/install-vscode.sh` once (or `--dev` while hacking) so `manthan.binary` points at the fork.
 3. **Reload Window**, then **Cmd+Esc** — launches the CLI with your global config only (no temp overlay).
 

@@ -11,12 +11,19 @@ import {
   isManthanProviderID,
   manthanReasoningEffort,
   manthanSessionHeaders,
+  decodeManthanCompactSummaryHeader,
+  nextManthanCompactMarkers,
+  parseManthanCompactMarkers,
   parseManthanContextHeaders,
   rememberManthanContext,
   requestManthanCompact,
   sessionIDFromFetch,
   sessionIDFromRequestHeaders,
   takeManthanContext,
+  shouldManthanCompactAutocontinue,
+  manthanSessionCancelUrl,
+  rememberManthanCancelTarget,
+  clearManthanCancelTarget,
 } from "../../src/provider/manthan"
 
 afterEach(() => {
@@ -28,7 +35,9 @@ describe("manthan Option A", () => {
   test("isManthanProviderID matches manthan ids", () => {
     expect(isManthanProviderID("manthan")).toBe(true)
     expect(isManthanProviderID("manthan/laguna-xs-2.1-sharded")).toBe(true)
+    expect(isManthanProviderID("custom/manthan/laguna")).toBe(true)
     expect(isManthanProviderID("openai")).toBe(false)
+    expect(isManthanProviderID("anthropic")).toBe(false)
   })
 
   test("isManthanConfig detects model, provider id, and client header", () => {
@@ -95,7 +104,7 @@ describe("manthan Option A", () => {
   })
 
   test("applyManthanModelPolicies overlays /v1/models window + compact %", () => {
-    const models = {
+    const models: Record<string, { id: string; limit: { context: number }; options?: Record<string, unknown> }> = {
       "laguna-xs-2.1-sharded": {
         id: "laguna-xs-2.1-sharded",
         limit: { context: 65536 },
@@ -127,6 +136,7 @@ describe("manthan Option A", () => {
     expect(usage!.compaction_threshold).toBe(96)
     expect(usage!.compaction_status).toBe("compacted")
     expect(usage!.cache_epoch).toBe(3)
+    expect(usage!.compact_summary).toBeNull()
     expect(formatManthanContextLabel(usage!)).toBe("12,345 / 65,536 · 43% · compact@96%")
   })
 
@@ -142,6 +152,16 @@ describe("manthan Option A", () => {
     rememberManthanContext("ses_1", usage)
     expect(takeManthanContext("ses_1")?.context_used).toBe(100)
     expect(takeManthanContext("ses_1")).toBeUndefined()
+  })
+
+  test("remember/take works via session id alias (subagent)", () => {
+    const usage = parseManthanContextHeaders({
+      "x-manthan-context-used": "200",
+      "x-manthan-compaction-status": "compacted",
+    })!
+    rememberManthanContext("ses_parent_affinity", usage, ["ses_child_subagent"])
+    expect(takeManthanContext("ses_child_subagent")?.compaction_status).toBe("compacted")
+    expect(takeManthanContext("ses_parent_affinity")).toBeUndefined()
   })
 
   test("sessionIDFromRequestHeaders prefers opencode session id", () => {
@@ -163,6 +183,122 @@ describe("manthan Option A", () => {
         response: new Headers({ "x-session-id": "ses_res" }),
       }),
     ).toBe("ses_res")
+  })
+
+  test("decodeManthanCompactSummaryHeader reads base64 summary", () => {
+    const summary = "Current task: wire auth\nFiles read: src/a.ts"
+    const b64 = Buffer.from(summary, "utf8").toString("base64")
+    expect(
+      decodeManthanCompactSummaryHeader({
+        "x-manthan-compact-summary-b64": b64,
+      }),
+    ).toBe(summary)
+    expect(
+      parseManthanContextHeaders({
+        "x-manthan-context-used": "100",
+        "x-manthan-compact-summary-b64": b64,
+      })?.compact_summary,
+    ).toBe(summary)
+  })
+
+  test("nextManthanCompactMarkers records one divider per compact epoch", () => {
+    const first = nextManthanCompactMarkers([], {
+      compactionStatus: "compacted",
+      epoch: 1,
+      messageID: "msg_a",
+      at: 10,
+      summary: "Current task: wire auth",
+    })
+    expect(first.added).toBe(true)
+    expect(first.markers).toEqual([
+      { messageID: "msg_a", epoch: 1, at: 10, summary: "Current task: wire auth" },
+    ])
+
+    const sameEpoch = nextManthanCompactMarkers(first.markers, {
+      compactionStatus: "compacted",
+      epoch: 1,
+      messageID: "msg_b",
+      at: 20,
+      summary: "Current task: wire auth",
+    })
+    expect(sameEpoch.added).toBe(false)
+
+    const nextEpoch = nextManthanCompactMarkers(first.markers, {
+      compactionStatus: "compacted",
+      epoch: 2,
+      messageID: "msg_c",
+      at: 30,
+      summary: "Current task: continue",
+    })
+    expect(nextEpoch.added).toBe(true)
+    expect(nextEpoch.markers).toHaveLength(2)
+
+    const growing = nextManthanCompactMarkers(nextEpoch.markers, {
+      compactionStatus: "growing",
+      epoch: 2,
+      messageID: "msg_d",
+    })
+    expect(growing.added).toBe(false)
+    expect(parseManthanCompactMarkers(nextEpoch.markers)).toHaveLength(2)
+
+    const emptyFalsePositive = nextManthanCompactMarkers(first.markers, {
+      compactionStatus: "compacted",
+      epoch: 3,
+      messageID: "msg_empty",
+      at: 40,
+    })
+    expect(emptyFalsePositive.added).toBe(false)
+
+    const reasonOnly = nextManthanCompactMarkers(first.markers, {
+      compactionStatus: "compacted",
+      epoch: 3,
+      messageID: "msg_reason",
+      at: 41,
+      compactReason: "threshold",
+    })
+    expect(reasonOnly.added).toBe(false)
+
+    const backToBack = nextManthanCompactMarkers(first.markers, {
+      compactionStatus: "compacted",
+      epoch: 2,
+      messageID: "msg_dup",
+      at: 10 + 5_000,
+      summary: "Current task: wire auth\nMore detail",
+    })
+    expect(backToBack.added).toBe(false)
+  })
+
+  test("nextManthanCompactMarkers still adds when user message id is missing", () => {
+    const orphan = nextManthanCompactMarkers([], {
+      compactionStatus: "compacted",
+      epoch: 4,
+      messageID: undefined,
+      at: 40,
+      summary: "Current task: explore repo",
+    })
+    expect(orphan.added).toBe(true)
+    expect(orphan.markers[0]?.messageID).toBe("__manthan_orphan_4")
+    expect(orphan.markers[0]?.summary).toBe("Current task: explore repo")
+  })
+
+  test("shouldManthanCompactAutocontinue only when compact added and turn would exit", () => {
+    expect(shouldManthanCompactAutocontinue({ added: true, finish: "stop" })).toBe(true)
+    expect(shouldManthanCompactAutocontinue({ added: true, finish: "length" })).toBe(true)
+    expect(shouldManthanCompactAutocontinue({ added: false, finish: "stop" })).toBe(false)
+    expect(shouldManthanCompactAutocontinue({ added: true, finish: "tool-calls" })).toBe(false)
+    expect(shouldManthanCompactAutocontinue({ added: true, finish: "stop", error: { name: "x" } })).toBe(false)
+  })
+
+  test("manthanSessionCancelUrl maps chat completions to sessions/cancel", () => {
+    expect(manthanSessionCancelUrl("http://host:3000/v1/chat/completions")).toBe(
+      "http://host:3000/v1/sessions/cancel",
+    )
+    rememberManthanCancelTarget({
+      sessionID: "ses_cancel",
+      chatUrl: "http://host:3000/v1/chat/completions",
+      headers: { Authorization: "Bearer t" },
+    })
+    clearManthanCancelTarget("ses_cancel")
   })
 
   test("request/consume Manthan compact is one-shot", () => {

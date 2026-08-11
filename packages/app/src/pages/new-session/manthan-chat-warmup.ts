@@ -17,17 +17,34 @@ import { normalizeSessionInfo } from "@/utils/session"
 import { showToast } from "@/utils/toast"
 import { subscribeManthanPromptProgress } from "./manthan-prompt-progress"
 
-const WARMUP_LINES = [
-  "hi",
-  "hey",
-  "hello",
-  "yo — ready when you are",
-  "hey there",
-  "good to go?",
-  "hi — just getting set up",
-]
+const WARMUP_LINE = "Hi, what can you do for me?"
 
 const WARMUP_TIMEOUT_MS = 4 * 60_000
+const ROTATE_MS = 2_800
+
+const WARMUP_ROTATE_LINES = [
+  "Warming up the silicon…",
+  "Waiting for a free brain cell…",
+  "Finding the least sleepy worker…",
+  "Loading the big brain…",
+  "Summoning the weights…",
+  "Reading the room. And the repository.",
+  "Digesting several thousand tokens…",
+  "Parsing your beautiful pile of context…",
+  "Thinking before touching production. Rare, but useful.",
+  "Connecting the architectural dots…",
+  "GPUs are stretching.",
+  "The tokens are tokening.",
+] as const
+
+function nextWarmupRotateLine(prev?: string | null): string {
+  const strip = String(prev ?? "")
+    .replace(/\s*\(\d+%\)$/, "")
+    .trim()
+  const candidates = strip ? WARMUP_ROTATE_LINES.filter((m) => m !== strip) : [...WARMUP_ROTATE_LINES]
+  const list = candidates.length > 0 ? candidates : WARMUP_ROTATE_LINES
+  return list[Math.floor(Math.random() * list.length)] ?? WARMUP_ROTATE_LINES[0]!
+}
 
 const warmedDrafts = new Set<string>()
 
@@ -56,7 +73,7 @@ function warmupEnabled(): boolean {
 }
 
 function pickWarmupLine(): string {
-  return WARMUP_LINES[Math.floor(Math.random() * WARMUP_LINES.length)]!
+  return WARMUP_LINE
 }
 
 function errorMessage(err: unknown): string {
@@ -88,9 +105,9 @@ export function useManthanChatWarmup(input: {
   const [active, setActive] = createSignal(false)
   const [percent, setPercent] = createSignal<number | null>(null)
   const [label, setLabel] = createSignal("Preparing chat…")
-  const [line, setLine] = createSignal<string | null>(null)
   const [tokenLabel, setTokenLabel] = createSignal<string | null>(null)
   const hasPercent = createMemo(() => percent() != null)
+  const line = createMemo(() => formatWarmupProgressLine(label(), percent()))
 
   const draftKey = createMemo(() => search.draftId || `dir:${sdk().directory}`)
 
@@ -114,12 +131,21 @@ export function useManthanChatWarmup(input: {
 
     const hello = pickWarmupLine()
     let timeoutId: number | undefined
+    let rotateId: number | undefined
     let cancelled = false
     let unsubProgress: (() => void) | undefined
+
+    const stopRotate = () => {
+      if (rotateId !== undefined) {
+        window.clearInterval(rotateId)
+        rotateId = undefined
+      }
+    }
 
     onCleanup(() => {
       cancelled = true
       if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+      stopRotate()
       unsubProgress?.()
     })
 
@@ -127,9 +153,11 @@ export function useManthanChatWarmup(input: {
     untrack(() => {
       setActive(true)
       setPercent(null)
-      setLabel("Starting Manthan…")
-      setLine(hello)
+      setLabel(nextWarmupRotateLine(null))
     })
+    rotateId = window.setInterval(() => {
+      untrack(() => setLabel(nextWarmupRotateLine(label())))
+    }, ROTATE_MS)
 
     void (async () => {
       try {
@@ -143,8 +171,6 @@ export function useManthanChatWarmup(input: {
         const selectedVariant =
           (agentVariant && agentVariant !== "default" ? agentVariant : undefined) ??
           untrack(() => input.controller.model.selection.variant.current())
-
-        untrack(() => setLabel("Creating session…"))
 
         const created = await sdk()
           .api.session.create({
@@ -175,12 +201,9 @@ export function useManthanChatWarmup(input: {
             }
           }
           untrack(() => {
-            const nextPct = pct ?? percent()
-            const nextLabel = p.message || label()
             if (pct != null) setPercent(pct)
             setTokenLabel(null)
             if (p.message) setLabel(p.message)
-            setLine(formatWarmupProgressLine(nextLabel, nextPct))
           })
         })
 
@@ -196,9 +219,6 @@ export function useManthanChatWarmup(input: {
           next.splice(result.index, 0, created)
           return next
         })
-
-        // Stay on New Chat until warm finishes — navigating early unmounts this hook.
-        untrack(() => setLabel("Warming model (first chat pays tools+system)…"))
 
         const text = hello
         const prompt = [{ type: "text" as const, content: text, start: 0, end: text.length }]
@@ -239,6 +259,7 @@ export function useManthanChatWarmup(input: {
           await new Promise((r) => setTimeout(r, 250))
         }
 
+        stopRotate()
         untrack(() => setLabel("Ready"))
         await new Promise((r) => setTimeout(r, 350))
         if (cancelled) return
@@ -265,11 +286,11 @@ export function useManthanChatWarmup(input: {
         }
       } finally {
         if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+        stopRotate()
         if (!cancelled) {
           untrack(() => {
             setActive(false)
             setPercent(null)
-            setLine(null)
             setTokenLabel(null)
           })
         }

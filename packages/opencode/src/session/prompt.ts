@@ -9,7 +9,12 @@ import { SessionRevert } from "./revert"
 import { Session } from "./session"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
-import { isManthanProviderID } from "@/provider/manthan"
+import { isManthanProviderID, manthanClientCompactAllowed, MANTHAN_COMPACT_CONTINUE_TEXT, requestManthanCompact } from "@/provider/manthan"
+import {
+  buildToolLoopPivotSteerText,
+  peekToolLoopPivot,
+  takeToolLoopPivot,
+} from "./loop-detection"
 
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
@@ -152,6 +157,10 @@ const layer = Layer.effect(
 
     const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
       yield* Effect.logInfo("cancel", { "session.id": sessionID })
+      // Bun often leaves the Manthan SSE TCP up after local abort — explicit cancel stops llama.
+      yield* Effect.sync(() => {
+        void import("@/provider/manthan").then((m) => m.requestManthanSessionCancel({ sessionID }))
+      })
       yield* state.cancel(sessionID)
     })
 
@@ -1164,6 +1173,52 @@ const layer = Layer.effect(
           }
 
           if (task?.type === "compaction") {
+            // Option A: Manthan already condensed. Never run OpenCode's Objective
+            // LLM summarizer (it re-reads warmup and invents a false Objective).
+            if (isManthanProviderID(lastUser.model.providerID) && !manthanClientCompactAllowed()) {
+              yield* Effect.logInfo(
+                "skipping OpenCode compaction.process for Manthan (Option A — seal UI row only)",
+              )
+              const now = Date.now()
+              yield* sessions.updateMessage({
+                id: MessageID.ascending(),
+                role: "assistant",
+                parentID: lastUser.id,
+                sessionID,
+                mode: "compaction",
+                agent: "compaction",
+                summary: true,
+                path: { cwd: ctx.directory, root: ctx.worktree },
+                cost: 0,
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                modelID: model.id,
+                providerID: model.providerID,
+                time: { created: now, completed: now },
+                finish: "stop",
+              })
+              // B: seal alone would exit runLoop (finish:stop). Mirror autocontinue.
+              if (task.auto) {
+                const continueMsg = yield* sessions.updateMessage({
+                  id: MessageID.ascending(),
+                  role: "user",
+                  sessionID,
+                  time: { created: Date.now() },
+                  agent: lastUser.agent,
+                  model: lastUser.model,
+                })
+                yield* sessions.updatePart({
+                  id: PartID.ascending(),
+                  messageID: continueMsg.id,
+                  sessionID,
+                  type: "text",
+                  metadata: { compaction_continue: true, manthan_compact_continue: true },
+                  synthetic: true,
+                  text: MANTHAN_COMPACT_CONTINUE_TEXT,
+                  time: { start: Date.now(), end: Date.now() },
+                })
+              }
+              continue
+            }
             const result = yield* compaction.process({
               messages: msgs,
               parentID: lastUser.id,
@@ -1180,8 +1235,15 @@ const layer = Layer.effect(
             lastFinished.summary !== true &&
             (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
           ) {
-            yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
-            continue
+            // Option A: never spin compaction.create (it no-ops for Manthan and
+            // used to loop forever while isOverflow stayed true). Ask the API to
+            // condense on the next turn instead.
+            if (isManthanProviderID(lastUser.model.providerID) && !manthanClientCompactAllowed()) {
+              requestManthanCompact(sessionID)
+            } else {
+              yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
+              continue
+            }
           }
 
           const agent = yield* agents.get(lastUser.agent)
@@ -1239,25 +1301,29 @@ const layer = Layer.effect(
             const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
             const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
             const promptOps = yield* ops()
+            // Forced text-only recovery after a tool-loop pivot threshold.
+            const toolLoopPivot = takeToolLoopPivot(sessionID)
 
-            const tools = yield* SessionTools.resolve({
-              agent,
-              session,
-              model,
-              processor: handle,
-              bypassAgentCheck,
-              messages: msgs,
-              promptOps,
-            }).pipe(
-              Effect.provideService(Plugin.Service, plugin),
-              Effect.provideService(Permission.Service, permission),
-              Effect.provideService(ToolRegistry.Service, registry),
-              Effect.provideService(MCP.Service, mcp),
-              Effect.provideService(Truncate.Service, truncate),
-              Effect.provideService(RuntimeFlags.Service, flags),
-            )
+            const tools = toolLoopPivot
+              ? ({} as Record<string, AITool>)
+              : yield* SessionTools.resolve({
+                  agent,
+                  session,
+                  model,
+                  processor: handle,
+                  bypassAgentCheck,
+                  messages: msgs,
+                  promptOps,
+                }).pipe(
+                  Effect.provideService(Plugin.Service, plugin),
+                  Effect.provideService(Permission.Service, permission),
+                  Effect.provideService(ToolRegistry.Service, registry),
+                  Effect.provideService(MCP.Service, mcp),
+                  Effect.provideService(Truncate.Service, truncate),
+                  Effect.provideService(RuntimeFlags.Service, flags),
+                )
 
-            if (lastUser.format?.type === "json_schema") {
+            if (!toolLoopPivot && lastUser.format?.type === "json_schema") {
               tools["StructuredOutput"] = createStructuredOutputTool({
                 schema: lastUser.format.schema,
                 onSuccess(output) {
@@ -1299,7 +1365,7 @@ const layer = Layer.effect(
               ],
               tools,
               model,
-              toolChoice: format.type === "json_schema" ? "required" : undefined,
+              toolChoice: toolLoopPivot ? "none" : format.type === "json_schema" ? "required" : undefined,
             })
 
             if (structured !== undefined) {
@@ -1334,14 +1400,59 @@ const layer = Layer.effect(
             }
 
             if (result === "stop") return "break" as const
-            if (result === "compact") {
-              yield* compaction.create({
+            if (result === "pivot") {
+              const info = peekToolLoopPivot(sessionID) ?? { tool: "tool", count: 0 }
+              const continueMsg = yield* sessions.updateMessage({
+                id: MessageID.ascending(),
+                role: "user",
                 sessionID,
+                time: { created: Date.now() },
                 agent: lastUser.agent,
                 model: lastUser.model,
-                auto: true,
-                overflow: !handle.message.finish,
               })
+              yield* sessions.updatePart({
+                id: PartID.ascending(),
+                messageID: continueMsg.id,
+                sessionID,
+                type: "text",
+                metadata: { tool_loop_pivot: true },
+                synthetic: true,
+                text: buildToolLoopPivotSteerText(info),
+                time: { start: Date.now(), end: Date.now() },
+              })
+              return "continue" as const
+            }
+            if (result === "compact") {
+              if (isManthanProviderID(lastUser.model.providerID) && !manthanClientCompactAllowed()) {
+                // Server owns condense — queue header + synthetic continue, no UI compact row.
+                requestManthanCompact(sessionID)
+                const continueMsg = yield* sessions.updateMessage({
+                  id: MessageID.ascending(),
+                  role: "user",
+                  sessionID,
+                  time: { created: Date.now() },
+                  agent: lastUser.agent,
+                  model: lastUser.model,
+                })
+                yield* sessions.updatePart({
+                  id: PartID.ascending(),
+                  messageID: continueMsg.id,
+                  sessionID,
+                  type: "text",
+                  metadata: { compaction_continue: true, manthan_compact_continue: true },
+                  synthetic: true,
+                  text: MANTHAN_COMPACT_CONTINUE_TEXT,
+                  time: { start: Date.now(), end: Date.now() },
+                })
+              } else {
+                yield* compaction.create({
+                  sessionID,
+                  agent: lastUser.agent,
+                  model: lastUser.model,
+                  auto: true,
+                  overflow: !handle.message.finish,
+                })
+              }
             }
             return "continue" as const
           }).pipe(

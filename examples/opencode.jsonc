@@ -1,0 +1,1299 @@
+// Example Manthan OpenCode global config (copy of a working ~/.config/opencode/opencode.jsonc).
+// Install:
+//   mkdir -p ~/.config/opencode
+//   cp examples/opencode.jsonc ~/.config/opencode/opencode.jsonc
+// Then set MANTHAN_API_KEY in your shell (do not commit a real key).
+// API host below is the shared GCP Manthan endpoint.
+
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "manthan/laguna-xs-2.1-sharded",
+  "permission": {
+    "bash": "allow"
+  },
+  "agent": {
+    "build": {
+      "model": "manthan/laguna-xs-2.1-sharded",
+      "variant": "medium",
+      "options": {
+        "reasoningEffort": "medium"
+      }
+    },
+    "plan": {
+      "model": "manthan/laguna-xs-2.1-sharded",
+      "variant": "medium",
+      "options": {
+        "reasoningEffort": "medium"
+      }
+    },
+    "code": {
+      "model": "manthan/laguna-xs-2.1-sharded",
+      "variant": "medium",
+      "options": {
+        "reasoningEffort": "medium"
+      }
+    }
+  },
+  "provider": {
+    "manthan": {
+      "name": "Manthan AI",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://34.47.151.185:3000/v1",
+        "apiKey": "{env:MANTHAN_API_KEY}",
+        "includeUsage": true,
+        "timeout": 1200000,
+        "chunkTimeout": 900000,
+        "headers": {
+          "Authorization": "Bearer {env:MANTHAN_API_KEY}",
+          "x-api-key": "{env:MANTHAN_API_KEY}",
+          "X-Manthan-Client": "opencode",
+          "X-Manthan-Reasoning-Effort": "medium",
+          "X-Title": "Manthan",
+          "HTTP-Referer": "https://manthan.ai"
+        }
+      },
+      "models": {
+        "qwen3.6-27b-sharded": {
+          "name": "Qwen3.6 27B (sharded)",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "reasoningEffort": "none"
+          },
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoning_effort": "none",
+              "body": {
+                "reasoning_effort": "none"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "none"
+              },
+              "options": {
+                "reasoningEffort": "none",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "none"
+                }
+              }
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoning_effort": "low",
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "low"
+              },
+              "options": {
+                "reasoningEffort": "low",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "low"
+                }
+              }
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoning_effort": "medium",
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "medium"
+              },
+              "options": {
+                "reasoningEffort": "medium",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "medium"
+                }
+              }
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoning_effort": "high",
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "high"
+              },
+              "options": {
+                "reasoningEffort": "high",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "high"
+                }
+              }
+            }
+          }
+        },
+        "qwen3.6-27b": {
+          "name": "Qwen3.6 27B",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "reasoningEffort": "none"
+          },
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoning_effort": "none",
+              "body": {
+                "reasoning_effort": "none"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "none"
+              },
+              "options": {
+                "reasoningEffort": "none",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "none"
+                }
+              }
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoning_effort": "low",
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "low"
+              },
+              "options": {
+                "reasoningEffort": "low",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "low"
+                }
+              }
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoning_effort": "medium",
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "medium"
+              },
+              "options": {
+                "reasoningEffort": "medium",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "medium"
+                }
+              }
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoning_effort": "high",
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "high"
+              },
+              "options": {
+                "reasoningEffort": "high",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "high"
+                }
+              }
+            }
+          }
+        },
+        "laguna-xs-2.1-sharded": {
+          "name": "Laguna XS 2.1 (sharded)",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 0.1,
+            "reasoningEffort": "medium"
+          },
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoning_effort": "none",
+              "body": {
+                "reasoning_effort": "none"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "none"
+              },
+              "options": {
+                "reasoningEffort": "none",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "none"
+                }
+              }
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoning_effort": "low",
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "low"
+              },
+              "options": {
+                "reasoningEffort": "low",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "low"
+                }
+              }
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoning_effort": "medium",
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "medium"
+              },
+              "options": {
+                "reasoningEffort": "medium",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "medium"
+                }
+              }
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoning_effort": "high",
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "high"
+              },
+              "options": {
+                "reasoningEffort": "high",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "high"
+                }
+              }
+            }
+          }
+        },
+        "laguna-xs-2.1": {
+          "name": "Laguna XS 2.1",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 0.1,
+            "reasoningEffort": "medium"
+          },
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoning_effort": "none",
+              "body": {
+                "reasoning_effort": "none"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "none"
+              },
+              "options": {
+                "reasoningEffort": "none",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "none"
+                }
+              }
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoning_effort": "low",
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "low"
+              },
+              "options": {
+                "reasoningEffort": "low",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "low"
+                }
+              }
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoning_effort": "medium",
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "medium"
+              },
+              "options": {
+                "reasoningEffort": "medium",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "medium"
+                }
+              }
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoning_effort": "high",
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "high"
+              },
+              "options": {
+                "reasoningEffort": "high",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "high"
+                }
+              }
+            }
+          }
+        },
+        "north-mini-code-1.0-sharded": {
+          "name": "North Mini Code 1.0 (sharded)",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 1.0,
+            "top_p": 0.95
+          },
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoning_effort": "none",
+              "body": {
+                "reasoning_effort": "none"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "none"
+              },
+              "options": {
+                "reasoningEffort": "none",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "none"
+                }
+              }
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoning_effort": "low",
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "low"
+              },
+              "options": {
+                "reasoningEffort": "low",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "low"
+                }
+              }
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoning_effort": "medium",
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "medium"
+              },
+              "options": {
+                "reasoningEffort": "medium",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "medium"
+                }
+              }
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoning_effort": "high",
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "high"
+              },
+              "options": {
+                "reasoningEffort": "high",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "high"
+                }
+              }
+            }
+          }
+        },
+        "north-mini-code-1.0": {
+          "name": "North Mini Code 1.0",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 1.0,
+            "top_p": 0.95
+          },
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoning_effort": "none",
+              "body": {
+                "reasoning_effort": "none"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "none"
+              },
+              "options": {
+                "reasoningEffort": "none",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "none"
+                }
+              }
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoning_effort": "low",
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "low"
+              },
+              "options": {
+                "reasoningEffort": "low",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "low"
+                }
+              }
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoning_effort": "medium",
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "medium"
+              },
+              "options": {
+                "reasoningEffort": "medium",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "medium"
+                }
+              }
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoning_effort": "high",
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "high"
+              },
+              "options": {
+                "reasoningEffort": "high",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "high"
+                }
+              }
+            }
+          }
+        },
+        "qwen3.5-27b-sharded": {
+          "name": "Qwen3.5 27B (sharded)",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "reasoningEffort": "none"
+          },
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoning_effort": "none",
+              "body": {
+                "reasoning_effort": "none"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "none"
+              },
+              "options": {
+                "reasoningEffort": "none",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "none"
+                }
+              }
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoning_effort": "low",
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "low"
+              },
+              "options": {
+                "reasoningEffort": "low",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "low"
+                }
+              }
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoning_effort": "medium",
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "medium"
+              },
+              "options": {
+                "reasoningEffort": "medium",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "medium"
+                }
+              }
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoning_effort": "high",
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "high"
+              },
+              "options": {
+                "reasoningEffort": "high",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "high"
+                }
+              }
+            }
+          }
+        },
+        "qwen3.5-27b": {
+          "name": "Qwen3.5 27B",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "reasoningEffort": "none"
+          },
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoning_effort": "none",
+              "body": {
+                "reasoning_effort": "none"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "none"
+              },
+              "options": {
+                "reasoningEffort": "none",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "none"
+                }
+              }
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoning_effort": "low",
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "low"
+              },
+              "options": {
+                "reasoningEffort": "low",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "low"
+                }
+              }
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoning_effort": "medium",
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "medium"
+              },
+              "options": {
+                "reasoningEffort": "medium",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "medium"
+                }
+              }
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoning_effort": "high",
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "high"
+              },
+              "options": {
+                "reasoningEffort": "high",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "high"
+                }
+              }
+            }
+          }
+        },
+        "qwen3.6-35b-a3b-sharded": {
+          "name": "Qwen3.6 35B A3B (sharded)",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 0.6,
+            "top_p": 0.95
+          },
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoning_effort": "none",
+              "body": {
+                "reasoning_effort": "none"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "none"
+              },
+              "options": {
+                "reasoningEffort": "none",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "none"
+                }
+              }
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoning_effort": "low",
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "low"
+              },
+              "options": {
+                "reasoningEffort": "low",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "low"
+                }
+              }
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoning_effort": "medium",
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "medium"
+              },
+              "options": {
+                "reasoningEffort": "medium",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "medium"
+                }
+              }
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoning_effort": "high",
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "high"
+              },
+              "options": {
+                "reasoningEffort": "high",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "high"
+                }
+              }
+            }
+          }
+        },
+        "qwen3.6-35b-a3b": {
+          "name": "Qwen3.6 35B A3B",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 0.6,
+            "top_p": 0.95
+          },
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoning_effort": "none",
+              "body": {
+                "reasoning_effort": "none"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "none"
+              },
+              "options": {
+                "reasoningEffort": "none",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "none"
+                }
+              }
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoning_effort": "low",
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "low"
+              },
+              "options": {
+                "reasoningEffort": "low",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "low"
+                }
+              }
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoning_effort": "medium",
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "medium"
+              },
+              "options": {
+                "reasoningEffort": "medium",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "medium"
+                }
+              }
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoning_effort": "high",
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "high"
+              },
+              "options": {
+                "reasoningEffort": "high",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "high"
+                }
+              }
+            }
+          }
+        },
+        "gemma-4-26b-a4b-sharded": {
+          "name": "Gemma 4 26B-A4B (sharded)",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 0.2,
+            "reasoningEffort": "none"
+          },
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoning_effort": "none",
+              "body": {
+                "reasoning_effort": "none"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "none"
+              },
+              "options": {
+                "reasoningEffort": "none",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "none"
+                }
+              }
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoning_effort": "low",
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "low"
+              },
+              "options": {
+                "reasoningEffort": "low",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "low"
+                }
+              }
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoning_effort": "medium",
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "medium"
+              },
+              "options": {
+                "reasoningEffort": "medium",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "medium"
+                }
+              }
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoning_effort": "high",
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "high"
+              },
+              "options": {
+                "reasoningEffort": "high",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "high"
+                }
+              }
+            }
+          }
+        },
+        "gemma-4-26b-a4b": {
+          "name": "Gemma 4 26B-A4B",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 0.2,
+            "reasoningEffort": "none"
+          },
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoning_effort": "none",
+              "body": {
+                "reasoning_effort": "none"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "none"
+              },
+              "options": {
+                "reasoningEffort": "none",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "none"
+                }
+              }
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoning_effort": "low",
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "low"
+              },
+              "options": {
+                "reasoningEffort": "low",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "low"
+                }
+              }
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoning_effort": "medium",
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "medium"
+              },
+              "options": {
+                "reasoningEffort": "medium",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "medium"
+                }
+              }
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoning_effort": "high",
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "high"
+              },
+              "options": {
+                "reasoningEffort": "high",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "high"
+                }
+              }
+            }
+          }
+        },
+        "devstral-small-2-sharded": {
+          "name": "Devstral Small 2 24B (sharded)",
+          "tool_call": true,
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 0.1,
+            "reasoningEffort": "low"
+          }
+        },
+        "devstral-small-2": {
+          "name": "Devstral Small 2 24B",
+          "tool_call": true,
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 0.1,
+            "reasoningEffort": "low"
+          }
+        },
+        "devstral-small-2507": {
+          "name": "Devstral Small 2507",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          },
+          "options": {
+            "temperature": 0.1,
+            "reasoningEffort": "low"
+          },
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoning_effort": "none",
+              "body": {
+                "reasoning_effort": "none"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "none"
+              },
+              "options": {
+                "reasoningEffort": "none",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "none"
+                }
+              }
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoning_effort": "low",
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "low"
+              },
+              "options": {
+                "reasoningEffort": "low",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "low"
+                }
+              }
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoning_effort": "medium",
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "medium"
+              },
+              "options": {
+                "reasoningEffort": "medium",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "medium"
+                }
+              }
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoning_effort": "high",
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "high"
+              },
+              "options": {
+                "reasoningEffort": "high",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "high"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "compaction": {
+    "auto": false,
+    "prune": true,
+    "reserved": 15729
+  },
+  "watcher": {
+    "ignore": [
+      "**/node_modules/**"
+    ]
+  }
+}

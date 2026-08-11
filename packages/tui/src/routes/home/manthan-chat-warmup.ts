@@ -9,17 +9,11 @@ import { useTuiPaths } from "../../context/runtime"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
 import { useHomeSessionDestination } from "./session-destination"
-import { formatWarmupProgressLine } from "../../util/manthan-context"
+import { formatWarmupProgressLine, nextWarmupRotateLine } from "../../util/manthan-context"
 
-const WARMUP_LINES = [
-  "hi",
-  "hey",
-  "hello",
-  "yo — ready when you are",
-  "hey there",
-  "good to go?",
-  "hi — just getting set up",
-]
+const ROTATE_MS = 2_800
+
+const WARMUP_LINE = "Hi, what can you do for me?"
 
 const WARMUP_TIMEOUT_MS = 4 * 60_000
 
@@ -36,7 +30,7 @@ function warmupEnabled(): boolean {
 }
 
 function pickWarmupLine(): string {
-  return WARMUP_LINES[Math.floor(Math.random() * WARMUP_LINES.length)]!
+  return WARMUP_LINE
 }
 
 type ProgressProps = {
@@ -54,7 +48,7 @@ function isPrefillStage(stage: string | null | undefined): boolean {
 }
 
 /**
- * On TUI home (New session) with a Manthan model: create session, send a short
+ * On TUI home (New session) with a Manthan model: create session, send a fixed
  * greeting to pay tools/system prefill once, show a % loader, then open the session.
  */
 export function useManthanChatWarmup() {
@@ -78,11 +72,20 @@ export function useManthanChatWarmup() {
   let started = false
   let cancelled = false
   let timeoutId: ReturnType<typeof setTimeout> | undefined
+  let rotateId: ReturnType<typeof setInterval> | undefined
   let unsubProgress: (() => void) | undefined
+
+  const stopRotate = () => {
+    if (rotateId !== undefined) {
+      clearInterval(rotateId)
+      rotateId = undefined
+    }
+  }
 
   onCleanup(() => {
     cancelled = true
     if (timeoutId !== undefined) clearTimeout(timeoutId)
+    stopRotate()
     unsubProgress?.()
   })
 
@@ -107,9 +110,12 @@ export function useManthanChatWarmup() {
     untrack(() => {
       setActive(true)
       setPercent(null)
-      setLabel("Starting Manthan…")
+      setLabel(nextWarmupRotateLine(null))
       setTokenLabel(null)
     })
+    rotateId = setInterval(() => {
+      untrack(() => setLabel(nextWarmupRotateLine(label())))
+    }, ROTATE_MS)
 
     void (async () => {
       try {
@@ -127,8 +133,6 @@ export function useManthanChatWarmup() {
         const dest = untrack(() => destination?.destination())
         const directory =
           dest?.type === "directory" ? dest.directory : sync.path.directory || paths.cwd
-
-        untrack(() => setLabel("Creating session…"))
 
         const res = await sdk.client.session.create({
           directory,
@@ -170,8 +174,6 @@ export function useManthanChatWarmup() {
           })
         })
 
-        untrack(() => setLabel("Warming model (first chat pays tools+system)…"))
-
         const promptPromise = sdk.client.session.prompt(
           {
             sessionID,
@@ -204,6 +206,7 @@ export function useManthanChatWarmup() {
           await new Promise((r) => setTimeout(r, 250))
         }
 
+        stopRotate()
         untrack(() => setLabel("Ready"))
         await new Promise((r) => setTimeout(r, 350))
         if (cancelled) return
@@ -224,6 +227,7 @@ export function useManthanChatWarmup() {
         }
         unsubProgress?.()
         unsubProgress = undefined
+        stopRotate()
         if (!cancelled) {
           untrack(() => {
             setActive(false)

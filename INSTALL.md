@@ -1,0 +1,63 @@
+# Install Manthan OpenCode (friend laptop)
+
+Needs: **git**, **[bun](https://bun.sh)**, **VS Code** with the `code` CLI  
+(`Cmd+Shift+P` → “Shell Command: Install 'code' command in PATH”).
+
+No Homebrew OpenCode. This repo **is** the client.
+
+## 1. Clone + deps
+
+```bash
+git clone https://github.com/odeskvaibhav/opencode-manthan.git
+cd opencode-manthan
+bun install
+```
+
+If you already have `infer-pool`, use `infer-pool/opencode-manthan` instead of cloning.
+
+## 2. Config (API URL + models)
+
+```bash
+./scripts/install-opencode-config.sh
+```
+
+That copies [`examples/opencode.jsonc`](examples/opencode.jsonc) → `~/.config/opencode/opencode.jsonc`  
+(skip if the file already exists; `--force` overwrites).
+
+Then set the key **in your shell**, not in git:
+
+```bash
+export MANTHAN_API_KEY='…'   # ask Vaibhav — same key as Kilo/Manthan
+```
+
+Put that export in `~/.zshrc` so VS Code terminals see it.
+
+The example points at the shared GCP API: `http://34.47.151.185:3000/v1`.
+
+## 3. VS Code extension
+
+```bash
+chmod +x scripts/opencode-manthan.sh
+./scripts/install-vscode.sh
+```
+
+- Sets `manthan.binary` to this repo’s `scripts/opencode-manthan.sh`
+- **Reload Window** (`Cmd+Shift+P` → Developer: Reload Window)
+- Open a project folder → **Cmd+Esc**
+
+Optional: `./scripts/install-vscode.sh --replace-stock` if stock OpenCode steals Cmd+Esc.
+
+## 4. Check
+
+Command Palette → **Manthan: Health check**  
+If that probe still hits localhost, set VS Code `manthan.baseUrl` to `http://34.47.151.185:3000/v1` (chat itself uses `opencode.jsonc`, not this setting).
+
+Home screen should say **MAN THAN**. First message can take a while (warmup).
+
+## What each piece is
+
+| Thing | Role |
+|--------|------|
+| `~/.config/opencode/opencode.jsonc` | API URL, models, key via `MANTHAN_API_KEY` |
+| `manthan.binary` | Which CLI Cmd+Esc runs (this fork) |
+| `manthan.baseUrl` | Health check only |

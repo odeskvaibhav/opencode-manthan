@@ -61,7 +61,7 @@ export const Parameters = Schema.Struct({
   }),
 })
 
-function renderOutput(input: {
+export function formatTaskToolOutput(input: {
   sessionID: SessionID
   state: "running" | "completed" | "error"
   summary?: string
@@ -76,6 +76,15 @@ function renderOutput(input: {
     `</${tag}>`,
     "</task>",
   ].join("\n")
+}
+
+function renderOutput(input: {
+  sessionID: SessionID
+  state: "running" | "completed" | "error"
+  summary?: string
+  text: string
+}) {
+  return formatTaskToolOutput(input)
 }
 
 export const TaskTool = Tool.define(
@@ -199,6 +208,21 @@ export const TaskTool = Tool.define(
 
       const runTask = Effect.fn("TaskTool.runTask")(function* () {
         const parts = yield* ops.resolvePromptParts(params.prompt)
+        const parent = yield* sessions.get(ctx.sessionID)
+        const parentTitle = parent.title?.trim() || "parent session"
+        // Light C: task brief only — never dump parent transcript into the child.
+        const brief = {
+          type: "text" as const,
+          synthetic: true,
+          text: [
+            "<parent_task_brief>",
+            `You are a subagent working on: ${params.description}`,
+            `Parent session: ${parentTitle}`,
+            "Your context is isolated from the parent. Work from this brief and your tool results only.",
+            "When finished, return one concise final answer for the parent agent.",
+            "</parent_task_brief>",
+          ].join("\n"),
+        }
         const result = yield* ops.prompt({
           messageID: MessageID.ascending(),
           sessionID: nextSession.id,
@@ -208,7 +232,7 @@ export const TaskTool = Tool.define(
           },
           variant: next.model ? undefined : variant,
           agent: next.name,
-          parts,
+          parts: [brief, ...parts],
         })
         return result.parts.findLast((item) => item.type === "text")?.text ?? ""
       })

@@ -111,8 +111,8 @@ export function permissionInfo(request: PermissionRequest): PermissionInfo {
   if (request.permission === "doom_loop") {
     return {
       icon: "⟳",
-      title: "Continue after repeated failures",
-      lines: ["This keeps the session running despite repeated failures."],
+      title: "Repeated tool call with no progress",
+      lines: ["This tool was called repeatedly without making progress."],
     }
   }
 

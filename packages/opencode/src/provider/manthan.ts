@@ -41,7 +41,7 @@ function headerLookup(headers: Record<string, string> | undefined, name: string)
 export function isManthanProviderID(id: string | undefined | null): boolean {
   if (!id) return false
   const s = id.toLowerCase()
-  return s === "manthan" || s.startsWith("manthan/") || s.includes("manthan")
+  return s === "manthan" || s.startsWith("manthan/") || /(^|\/)manthan(\/|$)/.test(s)
 }
 
 export function normalizeManthanModelId(id: string): string {
@@ -138,7 +138,7 @@ export function isManthanConfig(cfg: ManthanConfigSlice): boolean {
  * Option A defaults: disable OpenCode auto-compact + prune.
  * Escape hatch: OPENCODE_MANTHAN_ALLOW_CLIENT_COMPACT=1
  */
-export function applyManthanOptionA<T extends ManthanConfigSlice>(cfg: T): T {
+export function applyManthanOptionA(cfg: ManthanConfigSlice): ManthanConfigSlice {
   if (!isManthanConfig(cfg)) return cfg
   if (
     process.env.OPENCODE_MANTHAN_ALLOW_CLIENT_COMPACT === "1" ||
@@ -448,6 +448,80 @@ export function manthanSessionProgressUrl(chatRequestUrl: string | URL, sessionI
   }
 }
 
+/** `.../v1/chat/completions` → `.../v1/sessions/cancel` */
+export function manthanSessionCancelUrl(chatRequestUrl: string | URL): string | undefined {
+  try {
+    const u = new URL(String(chatRequestUrl))
+    const path = u.pathname.replace(/\/+$/, "")
+    const v1 = path.lastIndexOf("/v1")
+    u.pathname = v1 >= 0 ? `${path.slice(0, v1 + 3)}/sessions/cancel` : `/v1/sessions/cancel`
+    u.search = ""
+    u.hash = ""
+    return u.toString()
+  } catch {
+    return undefined
+  }
+}
+
+type ManthanCancelTarget = {
+  url: string
+  headers: Record<string, string>
+  chatUrl: string
+}
+
+const cancelTargetBySession = new Map<string, ManthanCancelTarget>()
+
+/** Remember how to cancel this session's Manthan job (for Esc when TCP stays up). */
+export function rememberManthanCancelTarget(opts: {
+  sessionID: string
+  chatUrl: string
+  headers?: Headers | Record<string, string>
+}): void {
+  if (!opts.sessionID) return
+  const url = manthanSessionCancelUrl(opts.chatUrl)
+  if (!url) return
+  cancelTargetBySession.set(opts.sessionID, {
+    url,
+    chatUrl: opts.chatUrl,
+    headers: headerRecord(opts.headers),
+  })
+}
+
+export function clearManthanCancelTarget(sessionID: string): void {
+  cancelTargetBySession.delete(sessionID)
+}
+
+/**
+ * Explicit Manthan cancel — Bun/OpenCode often abort the SSE reader without
+ * closing TCP quickly, so the API keeps inferencing until this fires.
+ */
+export function requestManthanSessionCancel(opts: {
+  sessionID: string
+  chatUrl?: string
+  headers?: Headers | Record<string, string>
+}): void {
+  const sessionID = opts.sessionID?.trim()
+  if (!sessionID) return
+  const remembered = cancelTargetBySession.get(sessionID)
+  const chatUrl = opts.chatUrl || remembered?.chatUrl
+  const url = (chatUrl ? manthanSessionCancelUrl(chatUrl) : undefined) || remembered?.url
+  if (!url) return
+  const headers: Record<string, string> = {
+    ...(remembered?.headers ?? {}),
+    ...headerRecord(opts.headers),
+    "content-type": "application/json",
+    "x-session-id": sessionID,
+    "x-opencode-session": sessionID,
+    "x-opencode-session-id": sessionID,
+  }
+  promptProgressBySession.delete(sessionID)
+  void fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ session_id: sessionID }),
+  }).catch(() => {})
+}
+
 function headerRecord(src: Headers | Record<string, string> | undefined): Record<string, string> {
   const out: Record<string, string> = {}
   if (!src) return out
@@ -550,11 +624,112 @@ export function clearManthanCompactQueue(): void {
   pendingCompact.clear()
 }
 
+/** Synthetic follow-up after Manthan server compact (mirrors OpenCode autocontinue). */
+export const MANTHAN_COMPACT_CONTINUE_TEXT =
+  "Context was compacted mid-task. Continue the unfinished work immediately with tools. Do not stop or ask for clarification unless the task is truly blocked — pick up from the recap's pending/next step."
+
+/**
+ * After Manthan condenses, the current assistant often finishes with `stop`.
+ * Without a new user turn the prompt loop exits and subagents look "stuck".
+ * Inject continue when a new compact marker was added and the turn would exit.
+ */
+export function shouldManthanCompactAutocontinue(input: {
+  added: boolean
+  finish: string | undefined
+  error?: unknown
+}): boolean {
+  if (!input.added) return false
+  if (input.error) return false
+  if (!input.finish || ["tool-calls", "unknown"].includes(input.finish)) return false
+  return true
+}
+
 export function manthanClientCompactAllowed(): boolean {
   return (
     process.env.OPENCODE_MANTHAN_ALLOW_CLIENT_COMPACT === "1" ||
     process.env.OPENCODE_MANTHAN_ALLOW_CLIENT_COMPACT === "true"
   )
+}
+
+/** Timeline divider after a real Manthan condense (Cursor-style, not an OpenCode compaction part). */
+export type ManthanCompactMarker = {
+  messageID: string
+  epoch: number
+  at: number
+  summary?: string
+}
+
+export function parseManthanCompactMarkers(raw: unknown): ManthanCompactMarker[] {
+  if (!Array.isArray(raw)) return []
+  const out: ManthanCompactMarker[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue
+    const o = item as Record<string, unknown>
+    if (typeof o.messageID !== "string" || !o.messageID) continue
+    const summary = typeof o.summary === "string" ? o.summary.trim() : ""
+    out.push({
+      messageID: o.messageID,
+      epoch: typeof o.epoch === "number" && Number.isFinite(o.epoch) ? Math.floor(o.epoch) : 0,
+      at: typeof o.at === "number" && Number.isFinite(o.at) ? o.at : 0,
+      ...(summary ? { summary } : {}),
+    })
+  }
+  return out
+}
+
+/** Append one divider per compact epoch / user turn. */
+export function nextManthanCompactMarkers(
+  prev: ManthanCompactMarker[] | undefined,
+  input: {
+    compactionStatus: string | null | undefined
+    epoch: number | null | undefined
+    messageID: string | null | undefined
+    at?: number
+    summary?: string | null
+    /** Present only when API actually ran server auto-compact this turn. */
+    compactReason?: string | null
+  },
+): { markers: ManthanCompactMarker[]; added: boolean } {
+  const markers = [...(prev ?? [])]
+  if (input.compactionStatus !== "compacted") {
+    return { markers, added: false }
+  }
+  const summary = input.summary?.trim() || ""
+  // Reject false positives: epoch bumps / client rewrites used to set
+  // status=compacted with no summary → empty "Earlier chat turns were condensed".
+  // Also require a real summary for the divider (reason-alone used to double-paint
+  // after OpenCode's compaction seal turn).
+  if (!summary) {
+    return { markers, added: false }
+  }
+  const epoch =
+    input.epoch != null && Number.isFinite(Number(input.epoch)) ? Math.floor(Number(input.epoch)) : null
+  const messageID =
+    (typeof input.messageID === "string" && input.messageID.trim()) ||
+    `__manthan_orphan_${epoch ?? "x"}`
+  if (markers.some((m) => m.messageID === messageID)) {
+    return { markers, added: false }
+  }
+  if (epoch != null && markers.some((m) => m.epoch === epoch)) {
+    return { markers, added: false }
+  }
+  const at = input.at ?? Date.now()
+  const last = markers[markers.length - 1]
+  // Back-to-back API/client compact echoes within 90s → one UI divider.
+  if (last && at - last.at < 90_000) {
+    const a = (last.summary || "").slice(0, 120)
+    const b = summary.slice(0, 120)
+    if (!a || !b || a === b || a.startsWith(b.slice(0, 40)) || b.startsWith(a.slice(0, 40))) {
+      return { markers, added: false }
+    }
+  }
+  markers.push({
+    messageID,
+    epoch: epoch ?? 0,
+    at,
+    summary,
+  })
+  return { markers, added: true }
 }
 
 /** Authoritative context usage from Manthan response headers (Phase 2). */
@@ -572,6 +747,10 @@ export type ManthanContextUsage = {
   newly_evaluated_tokens: number | null
   cache_generation: number | null
   updated_at: number
+  compact_summary?: string | null
+  compact_markers?: ManthanCompactMarker[]
+  compact_reason?: string | null
+  compact_usage_before_percent?: number | null
 }
 
 const pendingBySession = new Map<string, ManthanContextUsage>()
@@ -582,6 +761,23 @@ function headerGet(headers: Headers | Record<string, string> | undefined, name: 
     return (headers as Headers).get(name) ?? (headers as Headers).get(name.toLowerCase()) ?? undefined
   }
   return headerLookup(headers as Record<string, string>, name)
+}
+
+export function decodeManthanCompactSummaryHeader(
+  headers: Headers | Record<string, string> | undefined,
+): string | null {
+  const b64 = headerGet(headers, "x-manthan-compact-summary-b64")?.trim()
+  if (!b64) return null
+  try {
+    const text =
+      typeof Buffer !== "undefined"
+        ? Buffer.from(b64, "base64").toString("utf8")
+        : new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))
+    const cleaned = text.replace(/\[MANTHAN_CONTEXT_COMPACTION\]\s*/g, "").trim()
+    return cleaned || null
+  } catch {
+    return null
+  }
 }
 
 function numHeader(headers: Headers | Record<string, string> | undefined, name: string): number | null {
@@ -618,19 +814,42 @@ export function parseManthanContextHeaders(
     newly_evaluated_tokens: numHeader(headers, "x-manthan-newly-evaluated-tokens"),
     cache_generation: numHeader(headers, "x-manthan-cache-generation"),
     updated_at: Date.now(),
+    compact_summary: decodeManthanCompactSummaryHeader(headers),
+    compact_reason: headerGet(headers, "x-manthan-compact-reason") ?? null,
+    compact_usage_before_percent: numHeader(
+      headers,
+      "x-manthan-compact-usage-before-percent",
+    ),
   }
 }
+
+const SESSION_HEADER_KEYS = [
+  "x-opencode-session-id",
+  "x-opencode-session",
+  "x-session-affinity",
+  "x-session-id",
+] as const
 
 export function sessionIDFromRequestHeaders(
   headers: Headers | Record<string, string> | undefined,
 ): string | undefined {
-  return (
-    headerGet(headers, "x-opencode-session-id") ||
-    headerGet(headers, "x-opencode-session") ||
-    headerGet(headers, "x-session-affinity") ||
-    headerGet(headers, "x-session-id") ||
-    undefined
-  )
+  for (const key of SESSION_HEADER_KEYS) {
+    const v = headerGet(headers, key)?.trim()
+    if (v) return v
+  }
+  return undefined
+}
+
+/** All session ids on a header bag (child + affinity). Never includes x-parent-session-id. */
+export function allManthanSessionIDsFromHeaders(
+  headers: Headers | Record<string, string> | undefined,
+): string[] {
+  const ids: string[] = []
+  for (const key of SESSION_HEADER_KEYS) {
+    const v = headerGet(headers, key)?.trim()
+    if (v && !ids.includes(v)) ids.push(v)
+  }
+  return ids
 }
 
 /** AI SDK often puts headers on the Request, not init — also check response echo. */
@@ -649,8 +868,17 @@ export function sessionIDFromFetch(input: {
 }
 
 /** Stash latest Manthan context for a session (fetch → processor handoff). */
-export function rememberManthanContext(sessionID: string, usage: ManthanContextUsage): void {
-  pendingBySession.set(sessionID, usage)
+export function rememberManthanContext(
+  sessionID: string,
+  usage: ManthanContextUsage,
+  aliases?: string[],
+): void {
+  const ids = new Set<string>()
+  if (sessionID) ids.add(sessionID)
+  for (const id of aliases ?? []) {
+    if (id) ids.add(id)
+  }
+  for (const id of ids) pendingBySession.set(id, usage)
 }
 
 /** Read without clearing (TUI / debug). */
@@ -661,7 +889,10 @@ export function peekManthanContext(sessionID: string): ManthanContextUsage | und
 /** Take pending context once for persistence onto session.metadata. */
 export function takeManthanContext(sessionID: string): ManthanContextUsage | undefined {
   const v = pendingBySession.get(sessionID)
-  if (v) pendingBySession.delete(sessionID)
+  if (!v) return undefined
+  for (const [k, val] of pendingBySession) {
+    if (val === v) pendingBySession.delete(k)
+  }
   return v
 }
 
@@ -705,5 +936,12 @@ export function manthanContextFromMetadata(metadata: Record<string, unknown> | u
     newly_evaluated_tokens: typeof o.newly_evaluated_tokens === "number" ? o.newly_evaluated_tokens : null,
     cache_generation: typeof o.cache_generation === "number" ? o.cache_generation : null,
     updated_at: typeof o.updated_at === "number" ? o.updated_at : 0,
+    compact_summary: typeof o.compact_summary === "string" ? o.compact_summary.trim() || null : null,
+    compact_markers: parseManthanCompactMarkers(o.compact_markers),
+    compact_reason: typeof o.compact_reason === "string" ? o.compact_reason : null,
+    compact_usage_before_percent:
+      typeof o.compact_usage_before_percent === "number" && Number.isFinite(o.compact_usage_before_percent)
+        ? o.compact_usage_before_percent
+        : null,
   }
 }

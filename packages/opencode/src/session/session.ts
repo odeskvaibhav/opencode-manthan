@@ -615,7 +615,31 @@ const layer: Layer.Layer<
           Effect.catchCause(() => Effect.succeed(false)),
         )
 
-        if (hasInstance) yield* cancelBackgroundJobs(background, sessionID)
+        if (hasInstance) {
+          // Stop prompt loop + Manthan jobs for this session before deleting.
+          // Prefer SessionPrompt.cancel (Manthan + runner); fall back to RunState / background only.
+          const stopped = yield* Effect.gen(function* () {
+            const { SessionPrompt } = yield* Effect.promise(() => import("./prompt"))
+            const prompt = yield* Effect.serviceOption(SessionPrompt.Service)
+            if (Option.isSome(prompt)) {
+              yield* prompt.value.cancel(sessionID)
+              return true
+            }
+            const { SessionRunState } = yield* Effect.promise(() => import("./run-state"))
+            const run = yield* Effect.serviceOption(SessionRunState.Service)
+            if (Option.isSome(run)) {
+              yield* run.value.cancel(sessionID)
+              return true
+            }
+            return false
+          }).pipe(Effect.catchCause(() => Effect.succeed(false)))
+
+          if (!stopped) yield* cancelBackgroundJobs(background, sessionID)
+          yield* Effect.sync(() => {
+            void import("@/provider/manthan").then((m) => m.requestManthanSessionCancel({ sessionID }))
+          })
+        }
+
         const kids = yield* children(sessionID)
         for (const child of kids) {
           yield* remove(child.id)

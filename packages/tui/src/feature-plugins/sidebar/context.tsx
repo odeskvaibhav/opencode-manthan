@@ -2,7 +2,7 @@ import type { AssistantMessage } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, Show } from "solid-js"
-import { compactAtFromModel, manthanContextFromMetadata } from "../../util/manthan-context"
+import { compactAtFromModel, manthanContextFromMetadata, resolveCompactionThreshold } from "../../util/manthan-context"
 
 const id = "internal:sidebar-context"
 
@@ -24,7 +24,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
         tokens: manthan.context_used ?? 0,
         limit: manthan.context_limit,
         percent: manthan.context_usage_percent != null ? Math.round(manthan.context_usage_percent) : null,
-        compactAt: manthan.compaction_threshold != null ? Math.round(manthan.compaction_threshold) : null,
+        compactAt: resolveCompactionThreshold(manthan.compaction_threshold),
         source: "manthan" as const,
         status: manthan.compaction_status,
         power: {

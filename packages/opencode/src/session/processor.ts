@@ -4,16 +4,14 @@ import { Image } from "@/image/image"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Cause, Deferred, Effect, Exit, Layer, Context, Scope, Schema } from "effect"
 import * as Stream from "effect/Stream"
-import { Agent } from "@/agent/agent"
 import { Config } from "@/config/config"
-import { Permission } from "@/permission"
 import { Plugin } from "@/plugin"
 import { Snapshot } from "@/snapshot"
 import { Session } from "./session"
 import { LLM } from "./llm"
 import { MessageV2 } from "./message-v2"
 import { isOverflow } from "./overflow"
-import { PartID } from "./schema"
+import { MessageID, PartID } from "./schema"
 import type { SessionID } from "./schema"
 import { SessionRetry } from "./retry"
 import { SessionStatus } from "./status"
@@ -25,10 +23,27 @@ import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
-import { takeManthanContext } from "@/provider/manthan"
+import {
+  nextManthanCompactMarkers,
+  parseManthanCompactMarkers,
+  takeManthanContext,
+  shouldManthanCompactAutocontinue,
+  MANTHAN_COMPACT_CONTINUE_TEXT,
+  requestManthanCompact,
+  isManthanProviderID,
+  manthanClientCompactAllowed,
+} from "@/provider/manthan"
+import { NotFoundError } from "@/storage/storage"
+import {
+  evaluateToolLoop,
+  peekToolLoopPivot,
+  requestToolLoopPivot,
+  toolInvocationsFromMessages,
+  toolLoopKey,
+  ToolLoopAbortError,
+} from "./loop-detection"
 
-const DOOM_LOOP_THRESHOLD = 3
-export type Result = "compact" | "stop" | "continue"
+export type Result = "compact" | "stop" | "continue" | "pivot"
 
 export interface Handle {
   readonly message: SessionV1.Assistant
@@ -85,9 +100,7 @@ const layer = Layer.effect(
     const session = yield* Session.Service
     const config = yield* Config.Service
     const snapshot = yield* Snapshot.Service
-    const agents = yield* Agent.Service
     const llm = yield* LLM.Service
-    const permission = yield* Permission.Service
     const plugin = yield* Plugin.Service
     const summary = yield* SessionSummary.Service
     const scope = yield* Scope.Scope
@@ -200,6 +213,16 @@ const layer = Layer.effect(
         })
         if (error instanceof PermissionV1.RejectedError || error instanceof Question.RejectedError) {
           ctx.blocked = ctx.shouldBreak
+        }
+        // Pivot threshold: queue a forced text-only turn — do not halt for the user.
+        if (error instanceof ToolLoopAbortError && error.fatal) {
+          requestToolLoopPivot(ctx.sessionID, {
+            tool: error.tool,
+            count: error.count,
+            key: error.key,
+          })
+        } else if (ToolLoopAbortError.isFatal(error)) {
+          requestToolLoopPivot(ctx.sessionID, { tool: "tool", count: 0 })
         }
         yield* settleToolCall(toolCallID)
         return true
@@ -351,33 +374,31 @@ const layer = Layer.effect(
                 : value.providerMetadata,
             }))
 
-            const parts = yield* MessageV2.parts(ctx.assistantMessage.id).pipe(
-              Effect.provideService(Database.Service, database),
-            )
-            const recentParts = parts.slice(-DOOM_LOOP_THRESHOLD)
-
-            if (
-              recentParts.length !== DOOM_LOOP_THRESHOLD ||
-              !recentParts.every(
-                (part) =>
-                  part.type === "tool" &&
-                  part.tool === value.name &&
-                  part.state.status !== "pending" &&
-                  JSON.stringify(part.state.input) === JSON.stringify(input),
-              )
-            ) {
-              return
-            }
-
-            const agent = yield* agents.get(ctx.assistantMessage.agent)
-            yield* permission.ask({
-              permission: "doom_loop",
-              patterns: [value.name],
+            const page = yield* MessageV2.page({
               sessionID: ctx.assistantMessage.sessionID,
-              metadata: { tool: value.name, input },
-              always: [value.name],
-              ruleset: agent.permission,
-            })
+              limit: 40,
+            }).pipe(Effect.provideService(Database.Service, database))
+            const history = toolInvocationsFromMessages(
+              page.items.map((msg) => ({
+                parts: (msg.parts ?? []).filter(
+                  (p) => !(p.type === "tool" && "callID" in p && p.callID === value.id),
+                ),
+              })),
+            )
+            const decision = evaluateToolLoop(
+              history,
+              { tool: value.name, input },
+              { sessionID: ctx.assistantMessage.sessionID },
+            )
+            if (!decision.refuse) return
+
+            yield* failToolCall(
+              value.id,
+              new ToolLoopAbortError(value.name, decision.count, {
+                fatal: decision.pivot,
+                key: toolLoopKey(value.name, input),
+              }),
+            )
             return
           }
 
@@ -455,23 +476,73 @@ const layer = Layer.effect(
               cost: usage.cost,
             })
             yield* session.updateMessage(ctx.assistantMessage)
-            // Persist Manthan context headers onto session.metadata for TUI / ACP.
-            try {
-              const manthan = takeManthanContext(ctx.sessionID)
-              if (manthan) {
-                const current = yield* session.get(ctx.sessionID).pipe(Effect.catchAll(() => Effect.succeed(null)))
-                if (current) {
-                  yield* session.setMetadata({
+            const manthan = takeManthanContext(ctx.sessionID)
+            let manthanCompacted = false
+            if (manthan) {
+              const current = yield* session.get(ctx.sessionID).pipe(
+                Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)),
+              )
+              if (current) {
+                const prevManthan =
+                  current.metadata && typeof current.metadata === "object"
+                    ? (current.metadata as Record<string, unknown>).manthan
+                    : undefined
+                const prevMarkers = parseManthanCompactMarkers(
+                  prevManthan && typeof prevManthan === "object"
+                    ? (prevManthan as Record<string, unknown>).compact_markers
+                    : undefined,
+                )
+                const { markers, added } = nextManthanCompactMarkers(prevMarkers, {
+                  compactionStatus: manthan.compaction_status,
+                  epoch: manthan.cache_epoch ?? manthan.cache_generation,
+                  messageID: ctx.assistantMessage.id,
+                  summary: manthan.compact_summary,
+                  compactReason: manthan.compact_reason,
+                })
+                manthanCompacted = added
+                // Markers only — never enqueue type:compaction. That part becomes a
+                // prompt-loop task and runs OpenCode's Objective LLM summarizer,
+                // which paints a second "Subagent context summarised" right after
+                // Manthan's divider.
+                yield* session.setMetadata({
+                  sessionID: ctx.sessionID,
+                  metadata: {
+                    ...(current.metadata ?? {}),
+                    manthan: { ...manthan, compact_markers: markers },
+                  },
+                })
+                // Keep the loop alive after Manthan compact (esp. subagents).
+                // finish:stop on the condensed turn would otherwise exit runLoop.
+                if (
+                  shouldManthanCompactAutocontinue({
+                    added,
+                    finish: ctx.assistantMessage.finish,
+                    error: ctx.assistantMessage.error,
+                  })
+                ) {
+                  const continueMsg = yield* session.updateMessage({
+                    id: MessageID.ascending(),
+                    role: "user",
                     sessionID: ctx.sessionID,
-                    metadata: {
-                      ...(current.metadata ?? {}),
-                      manthan,
+                    time: { created: Date.now() },
+                    agent: ctx.assistantMessage.agent,
+                    model: {
+                      providerID: ctx.assistantMessage.providerID,
+                      modelID: ctx.assistantMessage.modelID,
                     },
+                  })
+                  yield* session.updatePart({
+                    id: PartID.ascending(),
+                    messageID: continueMsg.id,
+                    sessionID: ctx.sessionID,
+                    type: "text",
+                    metadata: { compaction_continue: true, manthan_compact_continue: true },
+                    synthetic: true,
+                    text: MANTHAN_COMPACT_CONTINUE_TEXT,
+                    time: { start: Date.now(), end: Date.now() },
                   })
                 }
               }
-            } catch {
-              // ignore
             }
             if (ctx.snapshot) {
               const patch = yield* snapshot.patch(ctx.snapshot)
@@ -493,7 +564,10 @@ const layer = Layer.effect(
                 messageID: ctx.assistantMessage.parentID,
               })
               .pipe(Effect.ignore, Effect.forkIn(scope))
+            // Manthan already condensed this turn — do not enqueue OpenCode
+            // compaction.create (second "Subagent context summarised").
             if (
+              !manthanCompacted &&
               !ctx.assistantMessage.summary &&
               isOverflow({ cfg: yield* config.get(), tokens: usage.tokens, model: ctx.model })
             ) {
@@ -624,6 +698,14 @@ const layer = Layer.effect(
         })
         const error = parse(e)
         if (SessionV1.ContextOverflowError.isInstance(error)) {
+          if (isManthanProviderID(ctx.assistantMessage.providerID) && !manthanClientCompactAllowed()) {
+            // Option A: do not surface overflow as a hard error or enqueue OpenCode
+            // compaction UI — next turn sends x-manthan-compact for the API.
+            requestManthanCompact(ctx.sessionID)
+            ctx.needsCompaction = true
+            yield* events.publish(Session.Event.Error, { sessionID: ctx.sessionID, error })
+            return
+          }
           if ((yield* config.get()).compaction?.auto === false && !ctx.assistantMessage.summary) {
             ctx.assistantMessage.error = error
             ctx.assistantMessage.finish = "error"
@@ -660,7 +742,9 @@ const layer = Layer.effect(
 
             yield* stream.pipe(
               Stream.tap((event) => handleEvent(event)),
-              Stream.takeUntil(() => ctx.needsCompaction),
+              // Stop draining on compaction OR tool-loop hard abort — otherwise a
+              // multi-event/multi-step stream could keep going after blocked=true.
+              Stream.takeUntil(() => ctx.needsCompaction || ctx.blocked),
               Stream.runDrain,
             )
           }).pipe(
@@ -697,6 +781,7 @@ const layer = Layer.effect(
 
           if (ctx.needsCompaction) return "compact"
           if (ctx.blocked || ctx.assistantMessage.error) return "stop"
+          if (peekToolLoopPivot(ctx.sessionID)) return "pivot"
           return "continue"
         })
       })
@@ -722,9 +807,7 @@ export const node = LayerNode.make({
     Session.node,
     Config.node,
     Snapshot.node,
-    Agent.node,
     LLM.node,
-    Permission.node,
     Plugin.node,
     SessionSummary.node,
     SessionStatus.node,

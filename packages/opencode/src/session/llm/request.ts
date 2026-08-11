@@ -212,13 +212,19 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         "User-Agent": USER_AGENT,
       }
 
-  const manthanHeaders = isManthanProviderID(input.model.providerID)
-    ? manthanSessionHeaders(input.sessionID)
-    : {}
-  const compactHeader =
-    isManthanProviderID(input.model.providerID) && consumeManthanCompact(input.sessionID)
-      ? { "x-manthan-compact": "1" }
-      : {}
+  const headerOut: Record<string, string> = {}
+  for (const [key, value] of Object.entries({
+    ...baseHeaders,
+    ...input.model.headers,
+    ...headers,
+  })) {
+    if (typeof value === "string") headerOut[key] = value
+  }
+  if (isManthanProviderID(input.model.providerID)) {
+    Object.assign(headerOut, manthanSessionHeaders(input.sessionID))
+    if (consumeManthanCompact(input.sessionID)) headerOut["x-manthan-compact"] = "1"
+    if (manthanEffort) headerOut["X-Manthan-Reasoning-Effort"] = manthanEffort
+  }
 
   return {
     system,
@@ -226,17 +232,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     tools: Object.fromEntries(Object.entries(tools).toSorted(([a], [b]) => a.localeCompare(b))),
     params,
     messageTransformOptions: options,
-    headers: ensureManthanClientHeaders(
-      {
-        ...baseHeaders,
-        ...manthanHeaders,
-        ...compactHeader,
-        ...input.model.headers,
-        ...headers,
-        ...(manthanEffort ? { "X-Manthan-Reasoning-Effort": manthanEffort } : {}),
-      },
-      input.model.providerID,
-    ),
+    headers: ensureManthanClientHeaders(headerOut, input.model.providerID),
   }
 })
 

@@ -181,7 +181,23 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const remove = Effect.fn("SessionHttpApi.remove")(function* (ctx: { params: { sessionID: SessionID } }) {
-      yield* SessionError.mapStorageNotFound(session.remove(ctx.params.sessionID))
+      // Abort parent + descendants before delete so prompt loops / Manthan jobs stop.
+      const root = ctx.params.sessionID
+      const stack: SessionID[] = [root]
+      const seen = new Set<SessionID>()
+      while (stack.length) {
+        const id = stack.pop()!
+        if (seen.has(id)) continue
+        seen.add(id)
+        const kids = yield* session.children(id).pipe(Effect.catchAll(() => Effect.succeed([] as Session.Info[])))
+        for (const kid of kids) stack.push(kid.id)
+      }
+      yield* Effect.forEach(
+        [...seen],
+        (id) => promptSvc.cancel(id).pipe(Effect.ignore, Effect.asVoid),
+        { concurrency: "unbounded", discard: true },
+      )
+      yield* SessionError.mapStorageNotFound(session.remove(root))
       return true
     })
 

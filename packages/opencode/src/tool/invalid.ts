@@ -13,9 +13,13 @@ export const InvalidTool = Tool.define(
     parameters: Parameters,
     execute: (params: { tool: string; error: string }) =>
       Effect.succeed({
-        title: "Invalid Tool",
-        output: `The arguments provided to the tool are invalid: ${params.error}`,
-        metadata: {},
+        title: "Unknown or invalid tool",
+        output: [
+          `Tool call failed for "${params.tool}".`,
+          params.error,
+          "Do not call a tool named invalid. Pick one of the available tools from the schema and retry with valid arguments.",
+        ].join("\n"),
+        metadata: { repaired: true, attempted: params.tool },
       }),
   }),
 )

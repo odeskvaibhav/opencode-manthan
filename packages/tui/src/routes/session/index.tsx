@@ -39,7 +39,14 @@ import type {
 } from "@opencode-ai/sdk/v2"
 import { useLocal } from "../../context/local"
 import { Locale } from "../../util/locale"
-import { manthanContextFromMetadata } from "../../util/manthan-context"
+import {
+  manthanContextFromMetadata,
+  manthanHasSummarised,
+  manthanLatestSummary,
+  manthanCompactDividerForMessage,
+  manthanCompactSummaryForMessage,
+  manthanSummarisedLabel,
+} from "../../util/manthan-context"
 import { webSearchProviderLabel } from "../../util/tool-display"
 import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import { useSDK } from "../../context/sdk"
@@ -254,6 +261,20 @@ export function Session() {
     return messages().findLast((x) => x.role === "assistant")
   })
 
+  const manthanOrphanDivider = createMemo(() => {
+    const usage = manthanContextFromMetadata(session()?.metadata as Record<string, unknown> | undefined)
+    if (!manthanHasSummarised(usage)) return null
+    const msgs = messages()
+    const hasCompactPart = msgs.some((m) =>
+      (sync.data.part[m.id] ?? []).some((p) => p.type === "compaction"),
+    )
+    if (hasCompactPart) return null
+    // Marker already attached to a rendered message → Assistant/User divider owns it.
+    const markers = usage?.compact_markers ?? []
+    if (markers.some((m) => msgs.some((msg) => msg.id === m.messageID))) return null
+    return { summary: manthanLatestSummary(usage) }
+  })
+
   const dimensions = useTerminalDimensions()
   const [sidebar, setSidebar] = kv.signal<"auto" | "hide">("sidebar", "auto")
   const [sidebarOpen, setSidebarOpen] = createSignal(false)
@@ -284,28 +305,6 @@ export function Session() {
   const toast = useToast()
   const sdk = useSDK()
   const editor = useEditorContext()
-
-  // Phase 3: toast when Manthan reports a server-side condense.
-  let lastManthanStatus: string | null | undefined
-  createEffect(() => {
-    const usage = manthanContextFromMetadata(session()?.metadata as Record<string, unknown> | undefined)
-    const status = usage?.compaction_status ?? null
-    if (
-      status &&
-      status !== lastManthanStatus &&
-      /compact|digest|condens/i.test(status) &&
-      status !== "ok" &&
-      status !== "none" &&
-      status !== "normal"
-    ) {
-      toast.show({
-        variant: "success",
-        message: `Context condensed by Manthan (${status})`,
-        duration: 3500,
-      })
-    }
-    lastManthanStatus = status
-  })
 
   createEffect(() => {
     const sessionID = route.sessionID
@@ -1327,6 +1326,14 @@ export function Session() {
                     </Switch>
                   )}
                 </For>
+                <Show when={manthanOrphanDivider()}>
+                  {(item) => (
+                    <ManthanSummarisedDivider
+                      summary={item().summary}
+                      subagent={!!session()?.parentID}
+                    />
+                  )}
+                </Show>
               </scrollbox>
               <box flexShrink={0}>
                 <Show when={permissions().length > 0}>
@@ -1405,6 +1412,7 @@ function UserMessage(props: {
 }) {
   const ctx = use()
   const local = useLocal()
+  const sync = useSync()
   const text = createMemo(() => {
     const texts = props.parts
       .map((x) => {
@@ -1425,6 +1433,16 @@ function UserMessage(props: {
   const metadataVisible = createMemo(() => queued() || ctx.showTimestamps())
 
   const compaction = createMemo(() => props.parts.find((x) => x.type === "compaction"))
+  const manthanUsage = createMemo(() => {
+    const sessionID = props.message.sessionID || ctx.sessionID
+    const session = sync.session.get(sessionID)
+    return manthanContextFromMetadata(session?.metadata as Record<string, unknown> | undefined)
+  })
+  const manthanSummaryText = createMemo(() => manthanLatestSummary(manthanUsage()))
+  const isSubagentSession = createMemo(() => {
+    const sessionID = props.message.sessionID || ctx.sessionID
+    return !!sync.session.get(sessionID)?.parentID
+  })
 
   return (
     <>
@@ -1489,15 +1507,29 @@ function UserMessage(props: {
         </box>
       </Show>
       <Show when={compaction()}>
-        <box
-          marginTop={1}
-          border={["top"]}
-          title=" Compaction "
-          titleAlignment="center"
-          borderColor={theme.borderActive}
-        />
+        <ManthanSummarisedDivider summary={manthanSummaryText()} subagent={isSubagentSession()} />
       </Show>
     </>
+  )
+}
+
+function ManthanSummarisedDivider(props: { summary?: string | null; subagent?: boolean }) {
+  const { theme } = useTheme()
+  const dims = useTerminalDimensions()
+  const body = () => props.summary?.trim() || "Earlier chat turns were condensed."
+  const rule = createMemo(() => {
+    const title = ` ${manthanSummarisedLabel(!!props.subagent)} `
+    const width = Math.max(24, Math.min(dims().width - 6, 96))
+    const side = Math.max(3, Math.floor((width - title.length) / 2))
+    return `${"·".repeat(side)}${title}${"·".repeat(side)}`
+  })
+  return (
+    <box marginTop={1} marginBottom={1} paddingLeft={1} paddingRight={1} flexShrink={0}>
+      <text fg={theme.borderActive}>{rule()}</text>
+      <text fg={theme.textMuted} wrapMode="word">
+        {body()}
+      </text>
+    </box>
   )
 }
 
@@ -1520,6 +1552,28 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
     if (!user || !user.time) return 0
     return props.message.time.completed - user.time.created
   })
+
+  const manthanUsage = createMemo(() => {
+    const session = sync.session.get(props.message.sessionID)
+    return manthanContextFromMetadata(session?.metadata as Record<string, unknown> | undefined)
+  })
+  const showManthanCompact = createMemo(() => {
+    if (!manthanCompactDividerForMessage(props.message.id, manthanUsage())) return false
+    // Prefer the dedicated compaction user-message divider when present.
+    const msgs = messages()
+    if (
+      msgs.some((m) => (sync.data.part[m.id] ?? []).some((p) => p.type === "compaction"))
+    ) {
+      return false
+    }
+    return true
+  })
+  const manthanSummaryText = createMemo(
+    () =>
+      manthanCompactSummaryForMessage(props.message.id, manthanUsage()) ||
+      manthanLatestSummary(manthanUsage()),
+  )
+  const isSubagentSession = createMemo(() => !!sync.session.get(props.message.sessionID)?.parentID)
 
   const childShortcut = useCommandShortcut("session.child.first")
   const backgroundShortcut = useCommandShortcut("session.background")
@@ -1606,6 +1660,9 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
           </box>
         </Match>
       </Switch>
+      <Show when={showManthanCompact()}>
+        <ManthanSummarisedDivider summary={manthanSummaryText()} subagent={isSubagentSession()} />
+      </Show>
     </>
   )
 }
@@ -2330,6 +2387,14 @@ function Task(props: ToolProps) {
 
     if (!isRunning() && props.part.state.status === "completed") {
       content.push(`↳ ${formatCompletedSubagentDetail(tools().length, Locale.duration(duration()))}`)
+    }
+
+    const child = sessionID() ? sync.session.get(sessionID()!) : undefined
+    const childUsage = manthanContextFromMetadata(child?.metadata as Record<string, unknown> | undefined)
+    if (manthanHasSummarised(childUsage)) {
+      content.push(`↳ ${manthanSummarisedLabel(true)}`)
+      const summary = manthanLatestSummary(childUsage)
+      if (summary) content.push(`↳ ${Locale.truncate(summary.replace(/\s+/g, " "), 160)}`)
     }
 
     return content.join("\n")

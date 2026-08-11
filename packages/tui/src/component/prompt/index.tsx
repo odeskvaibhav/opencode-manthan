@@ -44,6 +44,8 @@ import {
   formatContextBar,
   formatManthanContextLabel,
   manthanContextFromMetadata,
+  noteSharedCompactionThreshold,
+  subscribeSharedCompactionThreshold,
 } from "../../util/manthan-context"
 import { errorMessage } from "../../util/error"
 import { formatDuration } from "../../util/format"
@@ -167,6 +169,17 @@ export function Prompt(props: PromptProps) {
   const dialog = useDialog()
   const toast = useToast()
   const status = createMemo(() => sync.data.session_status?.[props.sessionID ?? ""] ?? { type: "idle" })
+  const [compactEpoch, setCompactEpoch] = createSignal(0)
+  onMount(() => {
+    onCleanup(subscribeSharedCompactionThreshold(() => setCompactEpoch((n) => n + 1)))
+  })
+  // Harvest compact@ from every synced session so parent/child footers stay aligned.
+  createEffect(() => {
+    for (const s of sync.data.session) {
+      const usage = manthanContextFromMetadata(s.metadata as Record<string, unknown> | undefined)
+      noteSharedCompactionThreshold(usage?.compaction_threshold, usage?.updated_at)
+    }
+  })
   const history = usePromptHistory()
   const stash = usePromptStash()
   const keymap = useOpencodeKeymap()
@@ -268,6 +281,7 @@ export function Prompt(props: PromptProps) {
   })
 
   const usage = createMemo(() => {
+    compactEpoch()
     if (!props.sessionID) return
     const session = sync.session.get(props.sessionID)
     const cost = session?.cost ?? 0
@@ -277,11 +291,8 @@ export function Prompt(props: PromptProps) {
     const manthanUsage = manthanContextFromMetadata(session?.metadata as Record<string, unknown> | undefined)
     const manthanLabel = manthanUsage ? formatManthanContextLabel(manthanUsage) : undefined
     if (manthanLabel) {
-      const status = manthanUsage?.compaction_status
-      const chip =
-        status && status !== "ok" && status !== "none" && status !== "normal" ? ` · ${status}` : ""
       return {
-        context: `${manthanLabel}${chip}`,
+        context: manthanLabel,
         cost: costLabel,
       }
     }

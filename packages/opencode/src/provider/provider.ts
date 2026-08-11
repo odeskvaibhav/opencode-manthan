@@ -1790,11 +1790,13 @@ const layer = Layer.effect(
             const {
               parseManthanContextHeaders,
               rememberManthanContext,
+              allManthanSessionIDsFromHeaders,
               sessionIDFromFetch,
               teeManthanProgressResponse,
               manthanSessionProgressUrl,
               startManthanProgressPoll,
               isManthanProviderID,
+              rememberManthanCancelTarget,
             } = await import("./manthan")
             const usage = parseManthanContextHeaders(res.headers)
             const sessionID = sessionIDFromFetch({
@@ -1802,17 +1804,36 @@ const layer = Layer.effect(
               initHeaders: opts.headers as Headers | Record<string, string> | undefined,
               response: res,
             })
-            if (usage && sessionID) rememberManthanContext(sessionID, usage)
+            if (usage && sessionID) {
+              rememberManthanContext(sessionID, usage, [
+                ...allManthanSessionIDsFromHeaders(
+                  opts.headers as Headers | Record<string, string> | undefined,
+                ),
+                ...(input instanceof Request
+                  ? allManthanSessionIDsFromHeaders(input.headers)
+                  : []),
+                ...allManthanSessionIDsFromHeaders(res.headers),
+              ])
+            }
             if (sessionID && isManthanProviderID(model.providerID)) {
               outRes = teeManthanProgressResponse(res, sessionID)
               const chatUrl = String(input instanceof Request ? input.url : input)
+              // Remember cancel target for Esc/session-delete only.
+              // Do NOT cancel on opts.signal abort — LLM stream scopes abort that
+              // signal on every successful turn end, which was killing the next
+              // subagent/tool-loop turn mid-inference via /v1/sessions/cancel.
+              rememberManthanCancelTarget({
+                sessionID,
+                chatUrl,
+                headers: opts.headers as Headers | Record<string, string> | undefined,
+              })
               const progressUrl = manthanSessionProgressUrl(chatUrl, sessionID)
               if (progressUrl) {
                 startManthanProgressPoll({
                   sessionID,
                   url: progressUrl,
                   headers: opts.headers as Headers | Record<string, string> | undefined,
-                  signal: opts.signal,
+                  signal: opts.signal ?? undefined,
                 })
               }
             }

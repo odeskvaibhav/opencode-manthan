@@ -18,6 +18,12 @@ import { MessageV2 } from "./message-v2"
 import { Session } from "./session"
 import { SessionProcessor } from "./processor"
 import { PartID } from "./schema"
+import {
+  evaluateToolLoop,
+  toolInvocationsFromMessages,
+  toolLoopKey,
+  ToolLoopAbortError,
+} from "./loop-detection"
 import { EffectBridge } from "@/effect/bridge"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
@@ -89,6 +95,21 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         .pipe(Effect.orDie),
   })
 
+  /** Refuse execution when the same/near-same tool has made no progress (cross-turn). */
+  const assertNotToolLoop = (toolName: string, args: unknown) => {
+    const decision = evaluateToolLoop(
+      toolInvocationsFromMessages(input.messages),
+      { tool: toolName, input: args },
+      { sessionID: input.session.id },
+    )
+    if (decision.refuse) {
+      throw new ToolLoopAbortError(toolName, decision.count, {
+        fatal: decision.pivot,
+        key: toolLoopKey(toolName, args),
+      })
+    }
+  }
+
   for (const item of yield* registry.tools({
     modelID: ModelV2.ID.make(input.model.api.id),
     providerID: input.model.providerID,
@@ -102,6 +123,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       execute(args, options) {
         return run.promise(
           Effect.gen(function* () {
+            assertNotToolLoop(item.id, args)
             const ctx = context(args, options)
             yield* plugin.trigger(
               "tool.execute.before",
@@ -155,6 +177,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       execute(args, opts) {
         return run.promise(
           Effect.gen(function* () {
+            assertNotToolLoop(MCP_RESOURCE_TOOLS.list, args)
             const parsed = parseListMcpResourcesArgs(args)
             const ctx = context(toRecord(args), opts)
             const clients = yield* mcp.clients()
@@ -238,6 +261,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       execute(args, opts) {
         return run.promise(
           Effect.gen(function* () {
+            assertNotToolLoop(MCP_RESOURCE_TOOLS.listTemplates, args)
             const parsed = parseListMcpResourcesArgs(args)
             const ctx = context(toRecord(args), opts)
             const clients = yield* mcp.clients()
@@ -325,6 +349,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       execute(args, opts) {
         return run.promise(
           Effect.gen(function* () {
+            assertNotToolLoop(MCP_RESOURCE_TOOLS.read, args)
             const parsed = parseReadMcpResourceArgs(args)
             const ctx = context(toRecord(args), opts)
             const clients = yield* mcp.clients()
@@ -398,6 +423,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     item.execute = (args, opts) =>
       run.promise(
         Effect.gen(function* () {
+          assertNotToolLoop(key, args)
           const ctx = context(args, opts)
           yield* plugin.trigger(
             "tool.execute.before",

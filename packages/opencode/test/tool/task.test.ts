@@ -731,6 +731,11 @@ describe("tool.task", () => {
       first.resolve()
       expect((yield* jobs.get(started.metadata.sessionId))?.status).toBe("running")
       expect((yield* Effect.promise(() => updated.promise)).parts).toEqual([
+        {
+          type: "text",
+          synthetic: true,
+          text: expect.stringContaining("<parent_task_brief>"),
+        },
         { type: "text", text: "also inspect cancellation" },
       ])
 
