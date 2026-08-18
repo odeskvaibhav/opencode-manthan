@@ -1,8 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import {
   compactAtFromModel,
+  findManthanProvider,
+  hasManthanProvider,
+  waitForManthanGpuFromProvider,
+  leaveManthanGpuFromProvider,
   formatManthanContextLabel,
   formatWarmupProgressLine,
+  isManthanLaunchMode,
+  isManthanProviderID,
+  manthanEnsureReadyRequest,
   manthanCompactAnchorForMessage,
   manthanCompactDividerForMessage,
   manthanCompactSummaryForMessage,
@@ -19,6 +26,77 @@ import {
 } from "./manthan-context"
 
 describe("tui manthan context", () => {
+  test("isManthanProviderID / findManthanProvider / hasManthanProvider", () => {
+    expect(isManthanProviderID("manthan")).toBe(true)
+    expect(isManthanProviderID("opencode")).toBe(false)
+    const providers = [
+      { id: "opencode", models: { "big-pickle": {} } },
+      { id: "manthan", models: { "laguna-xs-2.1-sharded": {} } },
+    ]
+    expect(findManthanProvider(providers)?.id).toBe("manthan")
+    expect(findManthanProvider([{ id: "manthan", models: {} }])).toBeUndefined()
+    expect(hasManthanProvider([{ id: "manthan", models: {} }])).toBe(true)
+    expect(hasManthanProvider([{ id: "opencode" }])).toBe(false)
+  })
+
+  test("leaveManthanGpuFromProvider POSTs leave", async () => {
+    const orig = globalThis.fetch
+    const calls: string[] = []
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      calls.push(String(init?.body ?? ""))
+      return new Response("{}", { status: 200 })
+    }) as typeof fetch
+    try {
+      leaveManthanGpuFromProvider({ id: "manthan", key: "k", options: { baseURL: "http://x/v1" } })
+      await new Promise((r) => setTimeout(r, 10))
+      expect(calls.some((b) => b.includes('"leave"'))).toBe(true)
+    } finally {
+      globalThis.fetch = orig
+    }
+  })
+
+  test("waitForManthanGpuFromProvider polls until ready", async () => {
+    const orig = globalThis.fetch
+    let n = 0
+    globalThis.fetch = (async () => {
+      n++
+      return new Response(JSON.stringify({ ready: n > 1, status: n > 1 ? "ready" : "waking" }), {
+        status: 200,
+      })
+    }) as typeof fetch
+    try {
+      const r = await waitForManthanGpuFromProvider(
+        { id: "manthan", key: "k", options: { baseURL: "http://x/v1" } },
+        { timeoutMs: 2000, pollMs: 5 },
+      )
+      expect(r).toBe("ready")
+      expect(n).toBeGreaterThan(1)
+    } finally {
+      globalThis.fetch = orig
+    }
+  })
+
+  test("manthanEnsureReadyRequest is POST launch after model pick", () => {
+    expect(manthanEnsureReadyRequest({ id: "opencode", options: { baseURL: "http://x/v1" } })).toBeNull()
+    const req = manthanEnsureReadyRequest({
+      id: "manthan",
+      key: "member-key",
+      options: { baseURL: "http://8.234.66.134:3000/v1/" },
+    })
+    expect(req?.url).toBe("http://8.234.66.134:3000/v1/workers/ensure-ready")
+    expect(req?.headers.Authorization).toBe("Bearer member-key")
+  })
+
+  test("isManthanLaunchMode reads OPENCODE_MANTHAN_MODE", () => {
+    const prev = process.env.OPENCODE_MANTHAN_MODE
+    process.env.OPENCODE_MANTHAN_MODE = "1"
+    expect(isManthanLaunchMode()).toBe(true)
+    process.env.OPENCODE_MANTHAN_MODE = "0"
+    expect(isManthanLaunchMode()).toBe(false)
+    if (prev === undefined) delete process.env.OPENCODE_MANTHAN_MODE
+    else process.env.OPENCODE_MANTHAN_MODE = prev
+  })
+
   test("reads metadata.manthan and formats label", () => {
     const usage = manthanContextFromMetadata({
       manthan: {

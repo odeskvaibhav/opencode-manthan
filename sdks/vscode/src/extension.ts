@@ -6,6 +6,7 @@ import {
   readManthanSettings,
 } from "./manthan"
 import { manthanCliCommand } from "./manthan-config"
+import { OpenOnEditController } from "./open-on-edit"
 
 const TERMINAL_NAME = "Manthan"
 /** Kept for focusing older terminals opened before rebrand. */
@@ -14,24 +15,50 @@ const LEGACY_TERMINAL_NAMES = ["Manthan", "opencode"]
 let statusBar: vscode.StatusBarItem | undefined
 let statusTimer: ReturnType<typeof setInterval> | undefined
 let activePort: number | undefined
+let openOnEdit: OpenOnEditController | undefined
 
 export function activate(context: vscode.ExtensionContext) {
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50)
-  statusBar.command = "opencode.manthanHealth"
+  statusBar.command = "opencode.openTerminal"
   statusBar.text = "Manthan"
-  statusBar.tooltip = "Manthan context (from OpenCode CLI session metadata)"
+  statusBar.tooltip = "Open Manthan (Cmd+Esc)"
   statusBar.show()
   context.subscriptions.push(statusBar)
+
+  openOnEdit = new OpenOnEditController({
+    enabled: () => readManthanSettings().openFilesOnEdit,
+    autoClose: () => readManthanSettings().autoCloseEditedFiles,
+    highlightMs: () => readManthanSettings().editHighlightMs,
+    stealFocus: () => readManthanSettings().openOnEditStealFocus,
+    directory: () => getWorkspaceDirectory(),
+  })
+  context.subscriptions.push(openOnEdit)
 
   const openNewTerminalDisposable = vscode.commands.registerCommand("opencode.openNewTerminal", async () => {
     await openTerminal(context)
   })
 
   const openTerminalDisposable = vscode.commands.registerCommand("opencode.openTerminal", async () => {
-    const existing = vscode.window.terminals.find((t) => LEGACY_TERMINAL_NAMES.includes(t.name))
+    const existing = vscode.window.terminals.find(
+      (t) => LEGACY_TERMINAL_NAMES.includes(t.name) && t.exitStatus === undefined,
+    )
     if (existing) {
-      existing.show()
-      return
+      // @ts-ignore env on creationOptions
+      const portRaw = existing.creationOptions?.env?.["_EXTENSION_OPENCODE_PORT"]
+      const port = portRaw ? parseInt(String(portRaw), 10) : undefined
+      if (port && Number.isFinite(port)) {
+        try {
+          await fetch(`http://127.0.0.1:${port}/app`, { signal: AbortSignal.timeout(400) })
+          existing.show()
+          activePort = port
+          openOnEdit?.start(port)
+          return
+        } catch {
+          existing.dispose()
+        }
+      } else {
+        existing.dispose()
+      }
     }
     await openTerminal(context)
   })
@@ -151,6 +178,7 @@ export function activate(context: vscode.ExtensionContext) {
       await appendPrompt(port, `In ${fileRef}`)
       terminal.show()
     }
+    openOnEdit?.start(port)
     void refreshStatusBar()
   }
 
@@ -208,6 +236,8 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {
   if (statusTimer) clearInterval(statusTimer)
+  openOnEdit?.dispose()
+  openOnEdit = undefined
 }
 
 const MANTHAN_ONEPAGER = `# Manthan × OpenCode (VS Code)
@@ -228,9 +258,21 @@ const MANTHAN_ONEPAGER = `# Manthan × OpenCode (VS Code)
 
 Edit **\`~/.config/opencode/opencode.jsonc\`** for base URL, API key, models, compaction. VS Code \`manthan.binary\` is the only launch setting that matters day-to-day.
 
+Leave top-level \`model\` **unset** in \`~/.config/opencode/opencode.jsonc\` (never pin sidecar \`qwen3.5-4b\`). On every launch / new session Manthan opens the model picker (live \`/v1/models\` only); after you pick, warmup runs.
+
 ## Context bar
 
 Status bar shows Manthan \`context_used\` / \`%\` from \`session.metadata.manthan\` (response headers). Enable **manthan.showPowerFields** for fresh tokens / reuse % / epoch.
+
+## Open on edit
+
+With **manthan.openFilesOnEdit** (default on), the extension listens to OpenCode SSE (\`/event\`) and opens files Manthan writes:
+
+- **Edit** → center-reveal and select the change range (diff hunk or \`oldString\`/\`newString\` match), with a brief find-match highlight (strong → soft → clear).
+- **Create** → cursor at last line; highlight spans new content when length is known.
+- Focus stays in the terminal unless **manthan.openOnEditStealFocus** is on.
+- **manthan.autoCloseEditedFiles** (default on) closes tabs *we* opened after the highlight fades (+~400ms), or on \`session.idle\`. Skips dirty / already-open tabs.
+- **manthan.editHighlightMs** (default 1100, \`0\` = off) controls highlight hold time.
 
 ## Docs
 

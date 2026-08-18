@@ -60,6 +60,7 @@ import { DialogAlert } from "./ui/dialog-alert"
 import { DialogConfirm } from "./ui/dialog-confirm"
 import { ToastProvider, useToast } from "./ui/toast"
 import { isDefaultTitle } from "./util/session"
+import { isManthanProviderID, leaveManthanGpuFromProvider } from "./util/manthan-context"
 import { KVProvider, useKV } from "./context/kv"
 import * as Model from "./util/model"
 import { ArgsProvider, useArgs, type Args } from "./context/args"
@@ -431,6 +432,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   onCleanup(() => {
     offSelectionKeys()
     attention.dispose()
+    const manthan = sync.data.provider.find((p) => isManthanProviderID(p.id))
+    if (manthan) leaveManthanGpuFromProvider(manthan)
   })
 
   // Wire up console copy-to-clipboard via opentui's onCopySelection callback
@@ -586,10 +589,11 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         slashName: "new",
         slashAliases: ["clear"],
         run: () => {
+          local.model.clear()
+          dialog.clear()
           route.navigate({
             type: "home",
           })
-          dialog.clear()
         },
       },
       {

@@ -9,19 +9,20 @@ import { useTuiPaths } from "../../context/runtime"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
 import { useHomeSessionDestination } from "./session-destination"
-import { formatWarmupProgressLine, nextWarmupRotateLine } from "../../util/manthan-context"
+import {
+  formatWarmupProgressLine,
+  isManthanProviderID,
+  nextWarmupRotateLine,
+  waitForManthanGpuFromProvider,
+  WARMUP_IDLE_MS,
+} from "../../util/manthan-context"
 
 const ROTATE_MS = 2_800
 
 const WARMUP_LINE = "Hi, what can you do for me?"
 
-const WARMUP_TIMEOUT_MS = 4 * 60_000
-
-function isManthanProvider(providerID: string | undefined): boolean {
-  if (!providerID) return false
-  const s = providerID.toLowerCase()
-  return s === "manthan" || s.startsWith("manthan/") || s.includes("manthan")
-}
+/** One auto-warmup per model per OpenCode process — session.new must not spawn another. */
+const warmedModels = new Set<string>()
 
 function warmupEnabled(): boolean {
   const raw = process.env.OPENCODE_MANTHAN_CHAT_WARMUP ?? process.env.MANTHAN_CHAT_WARMUP
@@ -50,6 +51,8 @@ function isPrefillStage(stage: string | null | undefined): boolean {
 /**
  * On TUI home (New session) with a Manthan model: create session, send a fixed
  * greeting to pay tools/system prefill once, show a % loader, then open the session.
+ * Session runner keeps tools for KV prefill but forces tool_choice=none and a
+ * single step so Laguna cannot bash/pwd then restate the intro.
  */
 export function useManthanChatWarmup() {
   const sdk = useSDK()
@@ -91,7 +94,7 @@ export function useManthanChatWarmup() {
 
   const manthanModelKey = createMemo(() => {
     const model = local.model.current()
-    if (!model || !isManthanProvider(model.providerID)) return null
+    if (!model || !isManthanProviderID(model.providerID)) return null
     return `${model.providerID}/${model.modelID}`
   })
 
@@ -102,6 +105,7 @@ export function useManthanChatWarmup() {
     if (!sync.ready || !local.model.ready) return
     const modelKey = manthanModelKey()
     if (!modelKey) return
+    if (warmedModels.has(modelKey)) return
     if (started) return
     started = true
 
@@ -118,6 +122,7 @@ export function useManthanChatWarmup() {
     }, ROTATE_MS)
 
     void (async () => {
+      let sessionID: string | undefined
       try {
         const model = untrack(() => local.model.current())
         const agent = untrack(() => local.agent.current())
@@ -129,6 +134,25 @@ export function useManthanChatWarmup() {
         const selectedVariant =
           (agentVariant && agentVariant !== "default" ? agentVariant : undefined) ??
           untrack(() => local.model.variant.current())
+
+        stopRotate()
+        untrack(() => setLabel("Waking GPU…"))
+        const provider = untrack(() => sync.data.provider.find((item) => item.id === model.providerID))
+        if (provider) {
+          const gpu = await waitForManthanGpuFromProvider(provider, {
+            cancelled: () => cancelled,
+            onStatus: (line) => {
+              if (line) untrack(() => setLabel(line))
+            },
+          })
+          if (cancelled) return
+          if (gpu === "capped") throw new Error("GPU cap reached — queued")
+          if (gpu === "timeout") throw new Error("GPU still waking — type when Fleet is READY")
+        }
+        if (cancelled) return
+        rotateId = setInterval(() => {
+          untrack(() => setLabel(nextWarmupRotateLine(label())))
+        }, ROTATE_MS)
 
         const dest = untrack(() => destination?.destination())
         const directory =
@@ -149,12 +173,19 @@ export function useManthanChatWarmup() {
         }
         if (cancelled) return
 
-        const sessionID = res.data.id
+        sessionID = res.data.id
+
+        let rejectIdle: (err: Error) => void = () => undefined
+        const armIdle = () => {
+          if (timeoutId !== undefined) clearTimeout(timeoutId)
+          timeoutId = setTimeout(() => rejectIdle(new Error("Warmup timed out")), WARMUP_IDLE_MS)
+        }
 
         unsubProgress = event.subscribe((evt) => {
           if ((evt as { type?: string }).type !== "manthan.prompt_progress") return
           const p = (evt as { properties?: ProgressProps }).properties
           if (!p || p.sessionID !== sessionID) return
+          armIdle()
           let pct: number | null = null
           if (isPrefillStage(p.stage)) {
             if (typeof p.percent === "number") pct = Math.max(0, Math.min(99, Math.round(p.percent)))
@@ -189,7 +220,8 @@ export function useManthanChatWarmup() {
         )
 
         const timeout = new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error("Warmup timed out")), WARMUP_TIMEOUT_MS)
+          rejectIdle = reject
+          armIdle()
         })
 
         await Promise.race([promptPromise, timeout])
@@ -211,14 +243,19 @@ export function useManthanChatWarmup() {
         await new Promise((r) => setTimeout(r, 350))
         if (cancelled) return
 
+        warmedModels.add(modelKey)
         route.navigate({ type: "session", sessionID })
       } catch (err) {
         if (!cancelled) {
           toast.show({
-            title: "Manthan warmup failed",
-            message: errorMessage(err),
-            variant: "error",
+            title: sessionID ? "Warmup timed out" : "Manthan warmup failed",
+            message: sessionID ? "Type when Fleet is READY." : errorMessage(err),
+            variant: sessionID ? "warning" : "error",
           })
+          if (sessionID) {
+            warmedModels.add(modelKey)
+            route.navigate({ type: "session", sessionID })
+          }
         }
       } finally {
         if (timeoutId !== undefined) {

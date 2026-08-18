@@ -14,6 +14,7 @@ import { PositiveInt } from "../schema"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
+import { EMPTY_SUCCESS_TOOL_OUTPUT, isEmptySuccessOutput } from "../session/loop-detection"
 
 export const name = "bash"
 export const DEFAULT_TIMEOUT_MS = 2 * 60 * 1_000
@@ -183,7 +184,8 @@ const layer = Layer.effectDiscard(
                 }
               }
 
-              const output = result.output?.toString("utf8") || "(no output)"
+              const raw = result.output?.toString("utf8") ?? ""
+              const output = isEmptySuccessOutput(raw) ? EMPTY_SUCCESS_TOOL_OUTPUT : raw
               const notice = result.outputTruncated
                 ? "[output capture truncated at the in-memory safety limit]"
                 : undefined

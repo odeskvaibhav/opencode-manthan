@@ -22,7 +22,9 @@
     "AI"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:opencode.openTerminal",
+    "onCommand:opencode.openNewTerminal"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -41,8 +43,8 @@
         },
         "manthan.model": {
           "type": "string",
-          "default": "manthan/laguna-xs-2.1-sharded",
-          "description": "Unused at launch — set model in ~/.config/opencode/opencode.jsonc"
+          "default": "",
+          "description": "Optional preferred model (empty = no pin). Prefer ~/.config/opencode/opencode.jsonc + OpenCode /models picker"
         },
         "manthan.binary": {
           "type": "string",
@@ -53,6 +55,27 @@
           "type": "boolean",
           "default": false,
           "description": "Status bar: show fresh tokens, reuse %, cache epoch"
+        },
+        "manthan.openFilesOnEdit": {
+          "type": "boolean",
+          "default": true,
+          "description": "When Manthan creates/edits a file, open it in the editor (cursor at change range, or EOF for creates). Disable if you prefer staying in the terminal only."
+        },
+        "manthan.autoCloseEditedFiles": {
+          "type": "boolean",
+          "default": true,
+          "description": "After Manthan finishes an edit, auto-close the tab we opened (after the edit highlight fades, or on session idle). Never closes dirty tabs or files you already had open."
+        },
+        "manthan.editHighlightMs": {
+          "type": "number",
+          "default": 1100,
+          "minimum": 0,
+          "description": "How long (ms) to highlight the changed lines when opening on edit. Uses the editor find-match colors (strong → soft → clear). Set 0 to disable."
+        },
+        "manthan.openOnEditStealFocus": {
+          "type": "boolean",
+          "default": false,
+          "description": "When opening a file Manthan edited, move keyboard focus to the editor. Default keeps focus in the Manthan terminal."
         }
       }
     },
@@ -94,6 +117,12 @@
         "title": "Manthan: Condense context"
       }
     ],
+    "configurationDefaults": {
+      "terminal.integrated.commandsToSkipShell": [
+        "opencode.openTerminal",
+        "opencode.openNewTerminal"
+      ]
+    },
     "menus": {
       "editor/title": [
         {
@@ -144,7 +173,7 @@
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vscode-test",
-    "test:unit": "bun test src/manthan.test.ts"
+    "test:unit": "bun test src/manthan.test.ts src/open-on-edit.test.ts"
   },
   "devDependencies": {
     "@types/vscode": "^1.94.0",

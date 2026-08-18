@@ -1,4 +1,4 @@
-import { createStore } from "solid-js/store"
+import { createStore, produce } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { batch, createEffect, createMemo } from "solid-js"
 import { useSync } from "./sync"
@@ -13,6 +13,7 @@ import { useTheme } from "./theme"
 import { useToast } from "../ui/toast"
 import { useRoute } from "./route"
 import { usePermission } from "./permission"
+import { hasManthanProvider, isManthanLaunchMode, isManthanProviderID, wakeManthanGpuFromProvider } from "../util/manthan-context"
 
 export type LocalTheme = {
   secondary: RGBA
@@ -197,6 +198,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         })
 
       const fallbackModel = createMemo(() => {
+        // Explicit CLI --model always wins (Home skips the picker when args.model is set).
         if (args.model) {
           const { providerID, modelID } = parseModel(args.model)
           if (isModelValid({ providerID, modelID })) {
@@ -206,6 +208,13 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             }
           }
         }
+
+        // Manthan launch / provider present: never auto-land on config.model, recent
+        // (e.g. Laguna), provider_default, or OpenCode Zen. Home opens DialogModel;
+        // warmup starts only after the user picks. Detect by provider id or
+        // OPENCODE_MANTHAN_MODE — do not wait for live models, or recent can win
+        // during the empty-catalog window.
+        if (isManthanLaunchMode() || hasManthanProvider(sync.data.provider)) return undefined
 
         if (sync.data.config.model) {
           const { providerID, modelID } = parseModel(sync.data.config.model)
@@ -336,7 +345,22 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               setModelStore("recent", recentModels(model, modelStore.recent))
               save()
             }
+            if (isManthanProviderID(model.providerID)) {
+              const p = sync.data.provider.find((item) => item.id === model.providerID)
+              if (p) wakeManthanGpuFromProvider(p)
+            }
           })
+        },
+        /** Drop in-session agent model so Home can force the Manthan picker again. */
+        clear() {
+          const a = agent.current()
+          if (!a) return
+          setModelStore(
+            "model",
+            produce((draft) => {
+              delete draft[a.name]
+            }),
+          )
         },
         toggleFavorite(model: { providerID: string; modelID: string }) {
           batch(() => {

@@ -21,6 +21,7 @@ import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { ShellPrompt, type Parameters } from "./shell/prompt"
 import { BashArity } from "@/permission/arity"
+import { EMPTY_SUCCESS_TOOL_OUTPUT, isEmptySuccessOutput } from "@opencode-ai/core/session/loop-detection"
 
 export { Parameters } from "./shell/prompt"
 
@@ -573,7 +574,7 @@ export const ShellTool = Tool.define(
       }
 
       let output = end.text
-      if (!output) output = "(no output)"
+      if (isEmptySuccessOutput(output)) output = EMPTY_SUCCESS_TOOL_OUTPUT
 
       if (cut && file) {
         output = `...output truncated...\n\nFull output saved to: ${file}\n\n` + output

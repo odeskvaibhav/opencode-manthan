@@ -616,15 +616,9 @@ const layer: Layer.Layer<
         )
 
         if (hasInstance) {
-          // Stop prompt loop + Manthan jobs for this session before deleting.
-          // Prefer SessionPrompt.cancel (Manthan + runner); fall back to RunState / background only.
+          // Stop runners / background jobs, then ask Manthan to cancel any in-flight SSE.
+          // Do not import SessionPrompt here — that creates a circular module load defect (HTTP 500).
           const stopped = yield* Effect.gen(function* () {
-            const { SessionPrompt } = yield* Effect.promise(() => import("./prompt"))
-            const prompt = yield* Effect.serviceOption(SessionPrompt.Service)
-            if (Option.isSome(prompt)) {
-              yield* prompt.value.cancel(sessionID)
-              return true
-            }
             const { SessionRunState } = yield* Effect.promise(() => import("./run-state"))
             const run = yield* Effect.serviceOption(SessionRunState.Service)
             if (Option.isSome(run)) {

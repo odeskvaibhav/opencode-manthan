@@ -6,8 +6,11 @@ import {
   clearManthanContextStore,
   consumeManthanCompact,
   ensureManthanClientHeaders,
+  ensureManthanModelsFromCatalog,
+  gpuWakeLabel,
   formatManthanContextLabel,
   isManthanConfig,
+  isManthanInternalSidecarModelId,
   isManthanProviderID,
   manthanReasoningEffort,
   manthanSessionHeaders,
@@ -15,6 +18,8 @@ import {
   nextManthanCompactMarkers,
   parseManthanCompactMarkers,
   parseManthanContextHeaders,
+  pruneManthanModelsToLiveCatalog,
+  pruneManthanSidecarModels,
   rememberManthanContext,
   requestManthanCompact,
   sessionIDFromFetch,
@@ -32,6 +37,12 @@ afterEach(() => {
 })
 
 describe("manthan Option A", () => {
+  test("gpuWakeLabel", () => {
+    expect(gpuWakeLabel("ready")).toBe("")
+    expect(gpuWakeLabel("waking")).toBe("Waking GPU…")
+    expect(gpuWakeLabel("capped")).toBe("GPU cap reached — queued")
+  })
+
   test("isManthanProviderID matches manthan ids", () => {
     expect(isManthanProviderID("manthan")).toBe(true)
     expect(isManthanProviderID("manthan/laguna-xs-2.1-sharded")).toBe(true)
@@ -117,6 +128,69 @@ describe("manthan Option A", () => {
     expect(applyManthanModelPolicies(models, policies)).toBe(1)
     expect(models["laguna-xs-2.1-sharded"].limit.context).toBe(10000)
     expect(models["laguna-xs-2.1-sharded"].options?.compaction_threshold).toBe(50)
+  })
+
+  test("ensureManthanModelsFromCatalog adds missing /v1/models ids", () => {
+    const models: Record<string, { id?: string; limit: { context: number }; api?: { id?: string } }> = {
+      "laguna-xs-2.1-sharded": {
+        id: "laguna-xs-2.1-sharded",
+        limit: { context: 65536 },
+      },
+    }
+    const catalog = new Map([
+      ["laguna-xs-2.1-sharded", { id: "laguna-xs-2.1-sharded", context_limit: 10000, compaction_threshold: 50 }],
+      ["qwen3.6-27b-sharded", { id: "qwen3.6-27b-sharded", context_limit: 65536, compaction_threshold: 40 }],
+    ])
+    expect(
+      ensureManthanModelsFromCatalog(models, catalog, {
+        providerID: "manthan",
+        npm: "@ai-sdk/openai-compatible",
+        url: "http://127.0.0.1:3000/v1",
+      }),
+    ).toBe(1)
+    expect(models["qwen3.6-27b-sharded"]?.id).toBe("qwen3.6-27b-sharded")
+    expect(models["qwen3.6-27b-sharded"]?.limit.context).toBe(65536)
+    expect(Object.keys(models)).toHaveLength(2)
+  })
+
+  test("sidecar helper models stay hidden from OpenCode picker", () => {
+    expect(isManthanInternalSidecarModelId("qwen3.5-4b")).toBe(true)
+    expect(isManthanInternalSidecarModelId("qwen3.5-4b-sidecar")).toBe(true)
+    expect(isManthanInternalSidecarModelId("laguna-xs-2.1")).toBe(false)
+    const models: Record<string, { id?: string; limit: { context: number }; api?: { id?: string } }> = {
+      "laguna-xs-2.1": { id: "laguna-xs-2.1", limit: { context: 65536 } },
+      "qwen3.5-4b": { id: "qwen3.5-4b", limit: { context: 8192 } },
+    }
+    const catalog = new Map([
+      ["qwen3.5-4b", { id: "qwen3.5-4b", context_limit: 8192, compaction_threshold: 50 }],
+      ["gemma-4-26b-a4b", { id: "gemma-4-26b-a4b", context_limit: 32768, compaction_threshold: 40 }],
+    ])
+    expect(
+      ensureManthanModelsFromCatalog(models, catalog, {
+        providerID: "manthan",
+        npm: "@ai-sdk/openai-compatible",
+        url: "http://127.0.0.1:3000/v1",
+      }),
+    ).toBe(1)
+    expect(models["gemma-4-26b-a4b"]?.id).toBe("gemma-4-26b-a4b")
+    expect(pruneManthanSidecarModels(models)).toBe(1)
+    expect(models["qwen3.5-4b"]).toBeUndefined()
+    models["qwen3.5-4b-sidecar"] = { id: "qwen3.5-4b-sidecar", limit: { context: 8192 } }
+    expect(pruneManthanSidecarModels(models)).toBe(1)
+    expect(models["qwen3.5-4b-sidecar"]).toBeUndefined()
+  })
+
+  test("pruneManthanModelsToLiveCatalog keeps live catalog ids", () => {
+    const models: Record<string, { id?: string; limit: { context: number }; api?: { id?: string } }> = {
+      "laguna-xs-2.1": { id: "laguna-xs-2.1", limit: { context: 65536 } },
+      "gemma-4-26b-a4b": { id: "gemma-4-26b-a4b", limit: { context: 65536 } },
+      "qwen3.6-27b-sharded": { id: "qwen3.6-27b-sharded", limit: { context: 65536 } },
+    }
+    const catalog = new Map([
+      ["laguna-xs-2.1", { id: "laguna-xs-2.1", context_limit: 65536, compaction_threshold: 96, workers: 1 }],
+    ])
+    expect(pruneManthanModelsToLiveCatalog(models, catalog)).toBe(2)
+    expect(Object.keys(models)).toEqual(["laguna-xs-2.1"])
   })
 
   test("parseManthanContextHeaders reads context bar fields", () => {
@@ -330,5 +404,24 @@ describe("manthan Option A", () => {
 
   test("manthanReasoningEffort defaults to medium when unset", () => {
     expect(manthanReasoningEffort({})).toBe("medium")
+  })
+
+  test("manthanReasoningEffort ignores static model options stub none", () => {
+    expect(
+      manthanReasoningEffort({
+        options: { reasoningEffort: "none", reasoning_effort: "none" },
+      }),
+    ).toBe("medium")
+  })
+
+  test("manthanReasoningEffort uses provider header when present", () => {
+    expect(
+      manthanReasoningEffort({
+        options: {
+          reasoningEffort: "none",
+          headers: { "X-Manthan-Reasoning-Effort": "high" },
+        },
+      }),
+    ).toBe("high")
   })
 })

@@ -4,30 +4,32 @@
 //   cp examples/opencode.jsonc ~/.config/opencode/opencode.jsonc
 // Then set MANTHAN_API_KEY in your shell (do not commit a real key).
 // API host below is the shared GCP Manthan endpoint.
+//
+// No top-level / agent `model` pin — on Manthan launch the model picker opens
+// (live GET /v1/models: READY workers only; static stubs offline are pruned);
+// after you pick, warmup runs. Also available via `/models` / the model chip.
+// Never pin sidecar ids (e.g. qwen3.5-4b) — they are hidden and fall back to Zen/Big Pickle.
 
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "manthan/laguna-xs-2.1-sharded",
   "permission": {
     "bash": "allow"
   },
+  // Default thinking/effort chip = medium (no model pin — picker still opens on launch).
   "agent": {
     "build": {
-      "model": "manthan/laguna-xs-2.1-sharded",
       "variant": "medium",
       "options": {
         "reasoningEffort": "medium"
       }
     },
     "plan": {
-      "model": "manthan/laguna-xs-2.1-sharded",
       "variant": "medium",
       "options": {
         "reasoningEffort": "medium"
       }
     },
     "code": {
-      "model": "manthan/laguna-xs-2.1-sharded",
       "variant": "medium",
       "options": {
         "reasoningEffort": "medium"
@@ -77,7 +79,7 @@
           "options": {
             "temperature": 0.6,
             "top_p": 0.95,
-            "reasoningEffort": "none"
+            "reasoningEffort": "medium"
           },
           "variants": {
             "none": {
@@ -169,7 +171,7 @@
           "options": {
             "temperature": 0.6,
             "top_p": 0.95,
-            "reasoningEffort": "none"
+            "reasoningEffort": "medium"
           },
           "variants": {
             "none": {
@@ -442,7 +444,8 @@
           },
           "options": {
             "temperature": 1.0,
-            "top_p": 0.95
+            "top_p": 0.95,
+            "reasoningEffort": "medium"
           },
           "variants": {
             "none": {
@@ -533,7 +536,8 @@
           },
           "options": {
             "temperature": 1.0,
-            "top_p": 0.95
+            "top_p": 0.95,
+            "reasoningEffort": "medium"
           },
           "variants": {
             "none": {
@@ -625,7 +629,7 @@
           "options": {
             "temperature": 0.6,
             "top_p": 0.95,
-            "reasoningEffort": "none"
+            "reasoningEffort": "medium"
           },
           "variants": {
             "none": {
@@ -717,7 +721,7 @@
           "options": {
             "temperature": 0.6,
             "top_p": 0.95,
-            "reasoningEffort": "none"
+            "reasoningEffort": "medium"
           },
           "variants": {
             "none": {
@@ -808,7 +812,8 @@
           },
           "options": {
             "temperature": 0.6,
-            "top_p": 0.95
+            "top_p": 0.95,
+            "reasoningEffort": "medium"
           },
           "variants": {
             "none": {
@@ -899,7 +904,8 @@
           },
           "options": {
             "temperature": 0.6,
-            "top_p": 0.95
+            "top_p": 0.95,
+            "reasoningEffort": "medium"
           },
           "variants": {
             "none": {
@@ -990,7 +996,7 @@
           },
           "options": {
             "temperature": 0.2,
-            "reasoningEffort": "none"
+            "reasoningEffort": "medium"
           },
           "variants": {
             "none": {
@@ -1081,7 +1087,7 @@
           },
           "options": {
             "temperature": 0.2,
-            "reasoningEffort": "none"
+            "reasoningEffort": "medium"
           },
           "variants": {
             "none": {
@@ -1214,7 +1220,7 @@
           },
           "options": {
             "temperature": 0.1,
-            "reasoningEffort": "low"
+            "reasoningEffort": "medium"
           },
           "variants": {
             "none": {

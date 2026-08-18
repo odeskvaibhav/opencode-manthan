@@ -19,7 +19,7 @@ import { subscribeManthanPromptProgress } from "./manthan-prompt-progress"
 
 const WARMUP_LINE = "Hi, what can you do for me?"
 
-const WARMUP_TIMEOUT_MS = 4 * 60_000
+const WARMUP_TIMEOUT_MS = 8 * 60_000
 const ROTATE_MS = 2_800
 
 const WARMUP_ROTATE_LINES = [
@@ -87,6 +87,8 @@ function errorMessage(err: unknown): string {
 /**
  * On New Chat with a Manthan model: create session, send a short greeting to
  * pay the tools/system prefill once, show a % loader, then unlock chat.
+ * Session runner keeps tools for KV prefill but forces tool_choice=none and a
+ * single step (no mid-warmup tool loop / re-intro).
  */
 export function useManthanChatWarmup(input: {
   controller: PromptInputV2ComposerController
@@ -186,8 +188,15 @@ export function useManthanChatWarmup(input: {
 
         if (cancelled) return
 
+        let rejectIdle: (err: Error) => void = () => undefined
+        const armIdle = () => {
+          if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+          timeoutId = window.setTimeout(() => rejectIdle(new Error("Warmup timed out")), WARMUP_TIMEOUT_MS)
+        }
+
         unsubProgress = subscribeManthanPromptProgress((p) => {
           if (p.sessionID !== created.id) return
+          armIdle()
           let pct: number | null = null
           if (isPrefillStage(p.stage)) {
             if (p.percent != null) pct = Math.max(0, Math.min(99, p.percent))
@@ -242,7 +251,8 @@ export function useManthanChatWarmup(input: {
         })
 
         const timeout = new Promise<never>((_, reject) => {
-          timeoutId = window.setTimeout(() => reject(new Error("Warmup timed out")), WARMUP_TIMEOUT_MS)
+          rejectIdle = reject
+          armIdle()
         })
 
         await Promise.race([promptPromise, timeout])

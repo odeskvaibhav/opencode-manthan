@@ -19,9 +19,19 @@ export function readManthanSettings(): ManthanSettings {
   return {
     baseUrl: (cfg.get<string>("baseUrl") || "http://127.0.0.1:3000/v1").replace(/\/$/, ""),
     apiKey: cfg.get<string>("apiKey") || process.env.MANTHAN_API_KEY || "",
-    model: cfg.get<string>("model") || "manthan/laguna-xs-2.1-sharded",
+    // Empty default — do not lock Laguna; ~/.config/opencode/opencode.jsonc + /models.
+    model: cfg.get<string>("model") || "",
     binary: cfg.get<string>("binary") || "opencode",
     showPowerFields: cfg.get<boolean>("showPowerFields") === true,
+    // Default on: interactive follow-along; turn off via Settings if noisy.
+    openFilesOnEdit: cfg.get<boolean>("openFilesOnEdit") !== false,
+    autoCloseEditedFiles: cfg.get<boolean>("autoCloseEditedFiles") !== false,
+    editHighlightMs: (() => {
+      const n = cfg.get<number>("editHighlightMs")
+      if (n == null || !Number.isFinite(n)) return 1100
+      return Math.max(0, Math.floor(n))
+    })(),
+    openOnEditStealFocus: cfg.get<boolean>("openOnEditStealFocus") === true,
   }
 }
 

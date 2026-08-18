@@ -105,8 +105,9 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
       })
     : undefined
   if (manthanEffort) {
-    if (options.reasoning_effort == null) options.reasoning_effort = manthanEffort
-    if (options.reasoningEffort == null) options.reasoningEffort = manthanEffort
+    // Always stamp — do not leave model stub `"none"`/`"low"` winning over medium default.
+    options.reasoning_effort = manthanEffort
+    options.reasoningEffort = manthanEffort
   }
   if (
     input.model.api.npm === "@ai-sdk/azure" &&

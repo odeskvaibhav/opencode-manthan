@@ -7,7 +7,6 @@ import { SessionID } from "../../src/session/schema"
 import { formatTaskToolOutput } from "../../src/tool/task"
 import {
   TOOL_LOOP_PIVOT_THRESHOLD,
-  TOOL_LOOP_REFUSE_THRESHOLD,
   ToolLoopAbortError,
   buildToolLoopPivotSteerText,
   evaluateToolLoop,
@@ -41,21 +40,15 @@ describe("customer journeys — tool loop → pivot → ban", () => {
       'find . -name mapping-data.ts -type f',
     ]
 
-    // Turns 1–2: allowed
-    expect(
-      evaluateToolLoop([emptyBash(cmds[0]!)], { tool: "bash", input: { command: cmds[1]! } }, { sessionID: SID })
-        .refuse,
-    ).toBe(false)
-
-    // Turn 3: refuse, not pivot — customer still sees the agent working
+    // Turn 2: refuse empty-success rematch — customer still sees the agent working
     const refuse = evaluateToolLoop(
-      [emptyBash(cmds[0]!), emptyBash(cmds[1]!)],
-      { tool: "bash", input: { command: cmds[2]! } },
+      [emptyBash(cmds[0]!)],
+      { tool: "bash", input: { command: cmds[1]! } },
       { sessionID: SID },
     )
     expect(refuse.refuse).toBe(true)
     expect(refuse.pivot).toBe(false)
-    expect(refuse.count).toBe(TOOL_LOOP_REFUSE_THRESHOLD)
+    expect(refuse.reason).toBe("empty_success")
     const refuseErr = new ToolLoopAbortError("bash", refuse.count, {
       fatal: false,
       key: toolLoopKey("bash", { command: cmds[2]! }),

@@ -61,15 +61,17 @@ export function DialogModel(props: { providerID?: string }) {
     const providerOptions = pipe(
       sync.data.provider,
       sortBy(
+        // Prefer Manthan over OpenCode Zen when both are present.
+        (provider) => (provider.id === "manthan" || provider.id.startsWith("manthan/") ? 0 : 1),
         (provider) => provider.id !== "opencode",
         (provider) => provider.name,
       ),
+      filter((provider) => (props.providerID ? provider.id === props.providerID : true)),
       flatMap((provider) =>
         pipe(
           provider.models,
           entries(),
           filter(([_, info]) => info.status !== "deprecated"),
-          filter(([_, info]) => (props.providerID ? info.providerID === props.providerID : true)),
           map(([model, info]) => ({
             value: { providerID: provider.id, modelID: model },
             title: info.name ?? model,

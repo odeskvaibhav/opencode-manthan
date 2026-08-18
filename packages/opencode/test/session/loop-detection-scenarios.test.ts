@@ -1,20 +1,23 @@
 import { describe, expect, test, beforeEach } from "bun:test"
 import {
+  EMPTY_SUCCESS_PIVOT_THRESHOLD,
+  EMPTY_SUCCESS_REFUSE_THRESHOLD,
   TOOL_LOOP_FAKE_PROGRESS_CAP,
   TOOL_LOOP_OSCILLATION_REFUSE,
-  TOOL_LOOP_PIVOT_THRESHOLD,
-  TOOL_LOOP_REFUSE_THRESHOLD,
   ToolLoopAbortError,
   banToolLoopKey,
   buildToolLoopPivotSteerText,
   countNoProgressStreak,
   countOscillationStreak,
+  countSameKeyEmptySuccess,
   evaluateToolLoop,
   peekToolLoopPivot,
   requestToolLoopPivot,
   resetToolLoopSessionState,
+  stripLeakedToolMarkup,
   takeToolLoopPivot,
   toolInvocationsFromMessages,
+  toolInvocationsFromV2Messages,
   toolLoopKey,
   toolLoopKeysRelated,
 } from "../../src/session/loop-detection"
@@ -45,19 +48,74 @@ describe("tool loop scenarios", () => {
     resetToolLoopSessionState("s1")
   })
 
-  test("scenario: exact identical empty bash succeeds → refuse@3 pivot@5", () => {
+  test("scenario: exact identical empty bash succeeds → refuse@2 pivot@3", () => {
     const args = { command: "rm -rf /tmp/x" }
+    const r2 = evaluateToolLoop([empty("bash", args)], { tool: "bash", input: args })
+    expect(r2.refuse).toBe(true)
+    expect(r2.pivot).toBe(false)
+    expect(r2.count).toBe(EMPTY_SUCCESS_REFUSE_THRESHOLD)
+    expect(r2.reason).toBe("empty_success")
+
     const h2 = [empty("bash", args), empty("bash", args)]
     const r3 = evaluateToolLoop(h2, { tool: "bash", input: args })
     expect(r3.refuse).toBe(true)
-    expect(r3.pivot).toBe(false)
-    expect(r3.count).toBe(TOOL_LOOP_REFUSE_THRESHOLD)
+    expect(r3.pivot).toBe(true)
+    expect(r3.count).toBe(EMPTY_SUCCESS_PIVOT_THRESHOLD)
+  })
 
-    const h4 = Array.from({ length: 4 }, () => empty("bash", args))
-    const r5 = evaluateToolLoop(h4, { tool: "bash", input: args })
-    expect(r5.refuse).toBe(true)
-    expect(r5.pivot).toBe(true)
-    expect(r5.count).toBe(TOOL_LOOP_PIVOT_THRESHOLD)
+  test("scenario: clean tsc (no output) rematch after reads still refuses", () => {
+    const tsc = {
+      command: "cd /tmp/portfolio-app && npx tsc --noEmit 2>&1 | head -50",
+    }
+    const noOut = { tool: "bash", input: tsc, output: "(no output)", status: "completed" as const }
+    const read = { tool: "read", input: { path: "App.tsx" }, output: "export const App = () => null", status: "completed" as const }
+    const history = [noOut, read]
+    expect(countSameKeyEmptySuccess(history, { tool: "bash", input: tsc })).toBe(2)
+    const d = evaluateToolLoop(history, { tool: "bash", input: tsc })
+    expect(d.refuse).toBe(true)
+    expect(d.pivot).toBe(false)
+    expect(d.reason).toBe("empty_success")
+
+    const hist2 = [noOut, read, noOut, read]
+    const pivot = evaluateToolLoop(hist2, { tool: "bash", input: tsc })
+    expect(pivot.refuse).toBe(true)
+    expect(pivot.pivot).toBe(true)
+  })
+
+  test("scenario: edit between empty tsc runs is real progress", () => {
+    const tsc = { command: "npx tsc --noEmit" }
+    const history = [
+      empty("bash", tsc),
+      { tool: "edit", input: { path: "App.tsx", content: "x" }, output: "ok", status: "completed" as const },
+    ]
+    expect(evaluateToolLoop(history, { tool: "bash", input: tsc }).refuse).toBe(false)
+  })
+
+  test("scenario: leaked tool XML is stripped from assistant text", () => {
+    const leaked = 'Let me check.\n<tool_call>\nbash\ncd /tmp && npx tsc --noEmit\n</tool_call>'
+    expect(stripLeakedToolMarkup(leaked)).toBe("Let me check.\n")
+    expect(stripLeakedToolMarkup("<tool_call>bash…")).not.toContain("<tool_call>")
+  })
+
+  test("scenario: V2 assistant content extracts bash invocations", () => {
+    const inv = toolInvocationsFromV2Messages([
+      {
+        type: "assistant",
+        content: [
+          {
+            type: "tool",
+            name: "bash",
+            state: {
+              status: "completed",
+              input: { command: "npx tsc --noEmit" },
+              content: [{ type: "text", text: "(no output)" }],
+            },
+          },
+        ],
+      },
+    ])
+    expect(inv).toHaveLength(1)
+    expect(inv[0]!.output).toBe("(no output)")
   })
 
   test("scenario: near-identical find flag tweaks collapse", () => {
@@ -82,7 +140,7 @@ describe("tool loop scenarios", () => {
       true,
     )
     expect(evaluateToolLoop(history, next).refuse).toBe(true)
-    expect(evaluateToolLoop(history, next).reason).toBe("streak")
+    expect(evaluateToolLoop(history, next).reason).toBe("empty_success")
   })
 
   test("scenario: real progress (changing test output) does not refuse early", () => {

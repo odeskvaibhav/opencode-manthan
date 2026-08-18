@@ -1,11 +1,9 @@
 import { describe, expect, test, beforeEach } from "bun:test"
 import {
-  TOOL_LOOP_REFUSE_THRESHOLD,
   TOOL_LOOP_PIVOT_THRESHOLD,
   ToolLoopAbortError,
   buildToolLoopPivotSteerText,
   clearToolLoopPivot,
-  countNoProgressStreak,
   evaluateToolLoop,
   peekToolLoopPivot,
   requestToolLoopPivot,
@@ -27,7 +25,7 @@ describe("tool loop detection", () => {
     expect(toolLoopKeysRelated(a, c)).toBe(true)
   })
 
-  test("refuses on third no-progress find but does not pivot yet", () => {
+  test("refuses the second identical empty find (empty-success)", () => {
     const history = [
       {
         tool: "bash",
@@ -35,19 +33,12 @@ describe("tool loop detection", () => {
         output: "",
         status: "completed" as const,
       },
-      {
-        tool: "bash",
-        input: { command: 'find . -name "*mapping*" -type f' },
-        output: "",
-        status: "completed" as const,
-      },
     ]
-    const next = { tool: "bash", input: { command: 'find . -name "*mapping-data*" -type f' } }
-    expect(countNoProgressStreak(history, next)).toBe(3)
+    const next = { tool: "bash", input: { command: 'find . -name "*mapping*" -type f' } }
     const decision = evaluateToolLoop(history, next)
     expect(decision.refuse).toBe(true)
     expect(decision.pivot).toBe(false)
-    expect(decision.count).toBe(TOOL_LOOP_REFUSE_THRESHOLD)
+    expect(decision.reason).toBe("empty_success")
   })
 
   test("pivots at hard threshold (not a user-facing halt)", () => {

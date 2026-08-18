@@ -36,6 +36,15 @@ import { SessionRunnerModel } from "./model"
 import { createLLMEventPublisher } from "./publish-llm-event"
 import { toLLMMessages } from "./to-llm-message"
 import { MAX_STEPS_PROMPT } from "./max-steps"
+import {
+  evaluateToolLoop,
+  peekToolLoopPivot,
+  requestToolLoopPivot,
+  takeToolLoopPivot,
+  toolInvocationsFromV2Messages,
+  toolLoopKey,
+  ToolLoopAbortError,
+} from "../loop-detection"
 import { Snapshot } from "../../snapshot"
 import { makeLocationNode } from "../../effect/app-node"
 import { llmClient } from "../../effect/app-node-platform"
@@ -52,7 +61,7 @@ import { llmClient } from "../../effect/app-node-platform"
  *   - [ ] Mark busy, retrying, idle, interrupted, or terminal-failure status durably.
  *   - [ ] Honor interruption and reject stale work after runtime attachment replacement.
  *   - [x] Honor optional agent step limits.
- *   - [ ] Bound provider retries and repeated identical tool calls.
+   *   - [x] Bound repeated identical tool calls (shared loop-detection; empty-success pivot).
  *
  * - Runtime context assembly
  *   - Track V1 runtime-context parity canonically in `specs/v2/session.md`.
@@ -200,7 +209,9 @@ const layer = Layer.effect(
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
       const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
-      const toolMaterialization = isLastStep ? undefined : yield* tools.materialize(agent.info?.permissions)
+      const toolLoopPivot = peekToolLoopPivot(session.id)
+      const textOnly = Boolean(toolLoopPivot) || isLastStep
+      const toolMaterialization = textOnly ? undefined : yield* tools.materialize(agent.info?.permissions)
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const request = LLM.request({
         model,
@@ -210,10 +221,11 @@ const layer = Layer.effect(
           .map(SystemPart.make),
         messages: [...toLLMMessages(context, model), ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : [])],
         tools: toolMaterialization?.definitions ?? [],
-        toolChoice: isLastStep ? "none" : undefined,
+        toolChoice: textOnly ? "none" : undefined,
       })
       if (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request }))
         return yield* Effect.die(continueAfterCompaction(currentStep))
+      if (toolLoopPivot) takeToolLoopPivot(session.id)
       const startSnapshot = yield* snapshots.capture()
       const publisher = createLLMEventPublisher(events, {
         sessionID: session.id,
@@ -243,6 +255,33 @@ const layer = Layer.effect(
             if (event.type !== "tool-call" || event.providerExecuted) return
             if (!toolMaterialization) {
               yield* withPublication(publisher.failUnsettledTools("Tools are disabled after the maximum agent steps"))
+              return
+            }
+            const loop = evaluateToolLoop(
+              toolInvocationsFromV2Messages(context),
+              { tool: event.name, input: event.input },
+              { sessionID: session.id },
+            )
+            if (loop.refuse) {
+              const err = new ToolLoopAbortError(event.name, loop.count, {
+                fatal: loop.pivot,
+                key: toolLoopKey(event.name, event.input),
+              })
+              if (err.fatal) {
+                requestToolLoopPivot(session.id, {
+                  tool: err.tool,
+                  count: err.count,
+                  key: err.key,
+                })
+              }
+              needsContinuation = true
+              yield* publish(
+                LLMEvent.toolResult({
+                  id: event.id,
+                  name: event.name,
+                  result: { type: "error", value: err.message },
+                }),
+              )
               return
             }
             needsContinuation = true

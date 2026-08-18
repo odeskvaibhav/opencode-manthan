@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build + package + install Manthan VS Code extension into local Code.
+# Build + package + install Manthan extension into VS Code only (not Cursor).
 # Usage:
 #   ./scripts/install-vscode.sh                 # ship VSIX + install
 #   ./scripts/install-vscode.sh --dev           # symlink source (Reload Window)
@@ -27,11 +27,6 @@ for arg in "$@"; do
   esac
 done
 
-if ! command -v code >/dev/null 2>&1; then
-  echo "error: 'code' CLI not on PATH (VS Code → Shell Command: Install 'code' command)" >&2
-  exit 1
-fi
-
 chmod +x "$WRAPPER"
 
 echo "==> build extension"
@@ -44,80 +39,135 @@ VERSION="$(node -p "require('./package.json').version")"
 PUBLISHER="$(node -p "require('./package.json').publisher")"
 NAME="$(node -p "require('./package.json').name")"
 EXT_ID="${PUBLISHER}.${NAME}"
-EXT_HOME="${VSCODE_EXTENSIONS:-$HOME/.vscode/extensions}"
-TARGET="$EXT_HOME/${EXT_ID}-${VERSION}"
 VSIX_PATH=""
 
-# Drop every installed/symlinked Manthan build (CLI --force fails while Code has it loaded)
-purge_manthan_ext() {
-  shopt -s nullglob
-  local d
-  for d in "$EXT_HOME"/${EXT_ID}-*; do
-    echo "    remove $d"
-    rm -rf "$d"
-  done
-  shopt -u nullglob
-}
-
-if [[ "$MODE" == "dev" ]]; then
-  echo "==> symlink install → $TARGET"
-  purge_manthan_ext
-  ln -sfn "$EXT_DIR" "$TARGET"
-else
+if [[ "$MODE" != "dev" ]]; then
   echo "==> package VSIX"
   rm -f "$EXT_DIR"/*.vsix
   VSIX_PATH="$(node "$ROOT/scripts/package-vscode-vsix.mjs")"
-  echo "==> install $VSIX_PATH → $TARGET"
-  # Direct extract avoids: "Please restart VS Code before reinstalling Manthan"
-  purge_manthan_ext
-  STAGE="$(mktemp -d)"
-  unzip -q "$VSIX_PATH" -d "$STAGE"
-  mkdir -p "$EXT_HOME"
-  mv "$STAGE/extension" "$TARGET"
-  rm -rf "$STAGE"
-  # Best-effort registry sync (ignore restart / in-use errors)
-  code --install-extension "$VSIX_PATH" --force >/dev/null 2>&1 || true
 fi
 
-if [[ "$REPLACE_STOCK" -eq 1 ]]; then
-  echo "==> uninstall stock OpenCode (command-id clash)"
-  code --uninstall-extension sst-dev.opencode 2>/dev/null || true
-  shopt -s nullglob
-  for d in "$EXT_HOME"/sst-dev.opencode-*; do
-    echo "    remove $d"
-    rm -rf "$d"
-  done
-  shopt -u nullglob
-fi
-
-SETTINGS="$HOME/Library/Application Support/Code/User/settings.json"
-if [[ -f "$SETTINGS" ]]; then
-  MANTHAN_SETTINGS="$SETTINGS" MANTHAN_WRAPPER="$WRAPPER" node <<'NODE'
+write_vscode_settings() {
+  local settings="$1"
+  mkdir -p "$(dirname "$settings")"
+  [[ -f "$settings" ]] || printf '%s\n' '{}' > "$settings"
+  MANTHAN_SETTINGS="$settings" MANTHAN_WRAPPER="$WRAPPER" node <<'NODE'
 const fs = require("fs");
 const path = process.env.MANTHAN_SETTINGS;
 const binary = process.env.MANTHAN_WRAPPER;
+const skip = ["opencode.openTerminal", "opencode.openNewTerminal"];
 let data;
 try {
   data = JSON.parse(fs.readFileSync(path, "utf8"));
 } catch {
-  console.log("skip settings (JSONC) — set manthan.binary manually to:\n  " + binary);
+  console.log("skip settings (JSONC) — set manthan.binary and terminal.integrated.commandsToSkipShell manually");
   process.exit(0);
 }
+let wrote = false;
 const cur = data["manthan.binary"];
 if (!cur || cur === "opencode" || String(cur).endsWith("opencode-manthan.sh")) {
   data["manthan.binary"] = binary;
-  fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
+  wrote = true;
   console.log("set manthan.binary →", binary);
 } else {
   console.log("keep manthan.binary =", cur);
 }
+const list = Array.isArray(data["terminal.integrated.commandsToSkipShell"])
+  ? data["terminal.integrated.commandsToSkipShell"]
+  : [];
+const next = [...list];
+for (const cmd of skip) {
+  if (!next.includes(cmd)) next.push(cmd);
+}
+if (next.length !== list.length) {
+  data["terminal.integrated.commandsToSkipShell"] = next;
+  wrote = true;
+  console.log("set terminal.integrated.commandsToSkipShell += opencode.openTerminal");
+}
+if (wrote) fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
 NODE
+}
+
+ensure_cmd_esc_binding() {
+  local kb="$1"
+  mkdir -p "$(dirname "$kb")"
+  if [[ ! -f "$kb" ]]; then
+    printf '%s\n' '[' '  { "key": "cmd+escape", "command": "opencode.openTerminal" }' ']' > "$kb"
+    echo "wrote $kb"
+    return 0
+  fi
+  if grep -q 'opencode.openTerminal' "$kb"; then
+    echo "keep keybinding in $kb"
+    return 0
+  fi
+  python3 - "$kb" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+entry = '''    {
+        "key": "cmd+escape",
+        "command": "opencode.openTerminal"
+    }'''
+if re.search(r'opencode\.openTerminal', text):
+    raise SystemExit(0)
+m = re.search(r'\[', text)
+if not m:
+    p.write_text("[\n" + entry + "\n]\n")
+    raise SystemExit(0)
+i = m.end()
+rest = text[i:].lstrip()
+insert = "\n" + entry + (",\n" if rest.startswith("{") else "\n")
+p.write_text(text[:i] + insert + text[i:])
+print("added cmd+escape → opencode.openTerminal")
+PY
+}
+
+install_into() {
+  local ext_home="$1"
+  local settings="$2"
+  local keybindings="${3:-}"
+  local label="$4"
+  mkdir -p "$ext_home"
+  local target="$ext_home/${EXT_ID}-${VERSION}"
+  echo "==> install $label → $target"
+  shopt -s nullglob
+  local d
+  for d in "$ext_home"/${EXT_ID}-*; do
+    echo "    remove $d"
+    rm -rf "$d"
+  done
+  shopt -u nullglob
+  if [[ "$MODE" == "dev" ]]; then
+    ln -sfn "$EXT_DIR" "$target"
+  else
+    local stage
+    stage="$(mktemp -d)"
+    unzip -q "$VSIX_PATH" -d "$stage"
+    mv "$stage/extension" "$target"
+    rm -rf "$stage"
+  fi
+  write_vscode_settings "$settings"
+  if [[ -n "$keybindings" ]]; then
+    ensure_cmd_esc_binding "$keybindings"
+  fi
+}
+
+if [[ -d "$HOME/.vscode" ]] || command -v code >/dev/null 2>&1; then
+  install_into \
+    "${VSCODE_EXTENSIONS:-$HOME/.vscode/extensions}" \
+    "$HOME/Library/Application Support/Code/User/settings.json" \
+    "$HOME/Library/Application Support/Code/User/keybindings.json" \
+    "VS Code"
+  if [[ "$REPLACE_STOCK" -eq 1 ]] && command -v code >/dev/null 2>&1; then
+    echo "==> uninstall stock OpenCode (VS Code)"
+    code --uninstall-extension sst-dev.opencode 2>/dev/null || true
+  fi
+  if [[ -n "$VSIX_PATH" ]] && command -v code >/dev/null 2>&1; then
+    code --install-extension "$VSIX_PATH" --force >/dev/null 2>&1 || true
+  fi
 fi
 
 echo
 echo "OK  $EXT_ID@$VERSION ($MODE)"
 [[ -n "$VSIX_PATH" ]] && echo "    $VSIX_PATH"
 echo "Reload Window (Cmd+Shift+P → Developer: Reload Window), then Cmd+Esc"
-if code --list-extensions 2>/dev/null | grep -q '^sst-dev.opencode$'; then
-  echo "NOTE: sst-dev.opencode still installed — re-run with --replace-stock"
-fi

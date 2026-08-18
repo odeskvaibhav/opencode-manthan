@@ -38,6 +38,7 @@ import {
   evaluateToolLoop,
   peekToolLoopPivot,
   requestToolLoopPivot,
+  stripLeakedToolMarkup,
   toolInvocationsFromMessages,
   toolLoopKey,
   ToolLoopAbortError,
@@ -589,32 +590,42 @@ const layer = Layer.effect(
             yield* session.updatePart(ctx.currentText)
             return
 
-          case "text-delta":
+          case "text-delta": {
             if (!ctx.currentText) return
-            ctx.currentText.text += value.text
+            const next = stripLeakedToolMarkup(ctx.currentText.text + value.text)
+            if (next === ctx.currentText.text) return
+            const delta = next.startsWith(ctx.currentText.text) ? next.slice(ctx.currentText.text.length) : null
+            ctx.currentText.text = next
             if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
-            yield* session.updatePartDelta({
-              sessionID: ctx.currentText.sessionID,
-              messageID: ctx.currentText.messageID,
-              partID: ctx.currentText.id,
-              field: "text",
-              delta: value.text,
-            })
+            if (delta) {
+              yield* session.updatePartDelta({
+                sessionID: ctx.currentText.sessionID,
+                messageID: ctx.currentText.messageID,
+                partID: ctx.currentText.id,
+                field: "text",
+                delta,
+              })
+            } else {
+              yield* session.updatePart(ctx.currentText)
+            }
             return
+          }
 
           case "text-end":
             if (!ctx.currentText) return
             // oxlint-disable-next-line no-self-assign -- reactivity trigger
-            ctx.currentText.text = ctx.currentText.text
-            ctx.currentText.text = (yield* plugin.trigger(
-              "experimental.text.complete",
-              {
-                sessionID: ctx.sessionID,
-                messageID: ctx.assistantMessage.id,
-                partID: ctx.currentText.id,
-              },
-              { text: ctx.currentText.text },
-            )).text
+            ctx.currentText.text = stripLeakedToolMarkup(ctx.currentText.text)
+            ctx.currentText.text = stripLeakedToolMarkup(
+              (yield* plugin.trigger(
+                "experimental.text.complete",
+                {
+                  sessionID: ctx.sessionID,
+                  messageID: ctx.assistantMessage.id,
+                  partID: ctx.currentText.id,
+                },
+                { text: ctx.currentText.text },
+              )).text,
+            )
             {
               const end = Date.now()
               ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
@@ -647,6 +658,7 @@ const layer = Layer.effect(
 
         if (ctx.currentText) {
           const end = Date.now()
+          ctx.currentText.text = stripLeakedToolMarkup(ctx.currentText.text)
           ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
           yield* session.updatePart(ctx.currentText)
           ctx.currentText = undefined

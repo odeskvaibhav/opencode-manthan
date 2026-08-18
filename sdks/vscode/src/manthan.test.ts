@@ -17,14 +17,46 @@ describe("vscode manthan helpers", () => {
       model: "manthan/laguna-xs-2.1-sharded",
       binary: "opencode",
       showPowerFields: false,
+      openFilesOnEdit: true,
+      autoCloseEditedFiles: true,
+      editHighlightMs: 1100,
+      openOnEditStealFocus: false,
     })
     const cfg = JSON.parse(raw) as {
+      model?: string
       compaction: { auto: boolean; prune: boolean }
-      provider: { manthan: { options: { headers: Record<string, string> } } }
+      agent?: { build?: { variant?: string; options?: { reasoningEffort?: string } } }
+      provider: { manthan: { options: { headers: Record<string, string> }; models: Record<string, unknown> } }
     }
     expect(cfg.compaction.auto).toBe(false)
     expect(cfg.compaction.prune).toBe(false)
     expect(cfg.provider.manthan.options.headers["X-Manthan-Client"]).toBe("opencode")
+    expect(cfg.provider.manthan.options.headers["X-Manthan-Reasoning-Effort"]).toBe("medium")
+    expect(cfg.agent?.build?.variant).toBe("medium")
+    expect(cfg.agent?.build?.options?.reasoningEffort).toBe("medium")
+    expect(cfg.model).toBe("manthan/laguna-xs-2.1-sharded")
+  })
+
+  test("buildManthanConfigContent omits model pin when unset", () => {
+    const raw = buildManthanConfigContent({
+      baseUrl: "http://127.0.0.1:3000/v1",
+      apiKey: "test-key",
+      model: "",
+      binary: "opencode",
+      showPowerFields: false,
+      openFilesOnEdit: true,
+      autoCloseEditedFiles: true,
+      editHighlightMs: 1100,
+      openOnEditStealFocus: false,
+    })
+    const cfg = JSON.parse(raw) as {
+      model?: string
+      agent?: { build?: { variant?: string } }
+      provider: { manthan: { models: Record<string, unknown> } }
+    }
+    expect(cfg.model).toBeUndefined()
+    expect(cfg.agent?.build?.variant).toBe("medium")
+    expect(cfg.provider.manthan.models).toEqual({})
   })
 
   test("formatStatusBar includes power fields when enabled", () => {

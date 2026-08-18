@@ -48,28 +48,170 @@ export function normalizeManthanModelId(id: string): string {
   return id.trim().replace(/^manthan\//i, "").toLowerCase()
 }
 
+/**
+ * Internal compact/helper ids — never show in OpenCode model picker.
+ * Matches Manthan API `isSidecarPickerModelId` (SIDECAR_MODEL + *-sidecar).
+ */
+export function isManthanInternalSidecarModelId(id: string): boolean {
+  const n = normalizeManthanModelId(id)
+  if (!n) return false
+  if (n === "sidecar" || n.endsWith("-sidecar")) return true
+  // Default SIDECAR_MODEL — keep in sync with infer-pool apps/api sidecar config.
+  if (n === "qwen3.5-4b" || n === "qwen3.5-4b-sidecar") return true
+  return false
+}
+
 export type ManthanModelPolicy = {
   context_limit: number
   compaction_threshold: number | null
 }
 
-type ManthanModelPatch = {
-  id?: string
-  api?: { id?: string }
-  limit: { context: number }
-  options?: Record<string, unknown>
+/** One row from Manthan GET /v1/models (id + context policy). */
+export type ManthanModelCatalogEntry = ManthanModelPolicy & {
+  id: string
+  name?: string
+  output_limit?: number
+  /** READY workers for this id (0 = loading / stub). */
+  workers?: number
 }
 
-/** Read admin compact window + % from Manthan GET /v1/models. */
-export async function fetchManthanModelPolicies(input: {
+type ManthanModelPatch = {
+  id?: string
+  name?: string
+  providerID?: string
+  api?: { id?: string; url?: string; npm?: string }
+  status?: string
+  headers?: Record<string, string>
+  options?: Record<string, unknown>
+  cost?: { input: number; output: number; cache: { read: number; write: number } }
+  limit: { context: number; output?: number }
+  capabilities?: {
+    temperature: boolean
+    reasoning: boolean
+    attachment: boolean
+    toolcall: boolean
+    input: { text: boolean; audio: boolean; image: boolean; video: boolean; pdf: boolean }
+    output: { text: boolean; audio: boolean; image: boolean; video: boolean; pdf: boolean }
+    interleaved: boolean | { field: string }
+  }
+  family?: string
+  release_date?: string
+  variants?: Record<string, unknown>
+}
+
+export type ManthanGpuReady = {
+  status: "ready" | "waking" | "queued" | "capped"
+  ready: boolean
+  lastError?: { message: string } | null
+}
+
+export function gpuWakeLabel(status: string | undefined): string {
+  if (!status || status === "ready") return ""
+  if (status === "capped") return "GPU cap reached — queued"
+  if (status === "queued") return "Queued for GPU…"
+  return "Waking GPU…"
+}
+
+export async function postManthanEnsureReady(input: {
+  baseURL: string
+  headers: Record<string, string>
+  reason: "launch" | "heartbeat" | "chat"
+  timeoutMs?: number
+}): Promise<ManthanGpuReady | "unauthorized" | "retry"> {
+  const base = input.baseURL.replace(/\/+$/, "")
+  try {
+    const res = await fetch(`${base}/workers/ensure-ready`, {
+      method: "POST",
+      headers: { ...input.headers, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ reason: input.reason }),
+      signal: AbortSignal.timeout(input.timeoutMs ?? 8000),
+    })
+    if (res.status === 401 || res.status === 403) return "unauthorized"
+    if (!res.ok) return "retry"
+    const body = (await res.json()) as ManthanGpuReady
+    return {
+      status: body.status || (body.ready ? "ready" : "waking"),
+      ready: body.ready === true,
+      lastError: body.lastError ?? null,
+    }
+  } catch {
+    return "retry"
+  }
+}
+
+let gpuHeartbeat: ReturnType<typeof setInterval> | null = null
+
+export function startManthanGpuHeartbeat(input: {
+  baseURL: string
+  headers: Record<string, string>
+  intervalMs?: number
+}): void {
+  if (gpuHeartbeat) return
+  const ms = input.intervalMs ?? 30_000
+  gpuHeartbeat = setInterval(() => {
+    void postManthanEnsureReady({ ...input, reason: "heartbeat", timeoutMs: 5000 })
+  }, ms)
+  if (typeof gpuHeartbeat === "object" && gpuHeartbeat && "unref" in gpuHeartbeat) {
+    gpuHeartbeat.unref()
+  }
+}
+
+export function stopManthanGpuHeartbeat(): void {
+  if (gpuHeartbeat) clearInterval(gpuHeartbeat)
+  gpuHeartbeat = null
+}
+
+/** Member-key path: wake org G4 then wait until READY (or cap/timeout). */
+export async function waitForManthanGpu(input: {
+  baseURL: string
+  headers: Record<string, string>
+  timeoutMs?: number
+  onStatus?: (s: ManthanGpuReady) => void
+}): Promise<ManthanGpuReady | null> {
+  const deadline = Date.now() + (input.timeoutMs ?? 12 * 60_000)
+  let first = true
+  while (Date.now() < deadline) {
+    const snap = await postManthanEnsureReady({
+      ...input,
+      reason: first ? "launch" : "heartbeat",
+    })
+    first = false
+    if (snap === "unauthorized") return null
+    if (snap === "retry") {
+      await new Promise((r) => setTimeout(r, 2000))
+      continue
+    }
+    input.onStatus?.(snap)
+    if (snap.ready || snap.status === "ready") return snap
+    if (snap.status === "capped") return snap
+    const line = gpuWakeLabel(snap.status)
+    if (line) {
+      try {
+        process.stderr.write(`\r${line}   `)
+      } catch {
+        /* ignore */
+      }
+    }
+    await new Promise((r) => setTimeout(r, 2000))
+  }
+  return { status: "queued", ready: false }
+}
+
+/**
+ * Read live selectable models from Manthan GET /v1/models.
+ * Returns `null` when the request fails (caller keeps static config).
+ * On success, **available** rows (excludes sidecar + capability stubs).
+ * Org allowlist ids are included even when workers=0 (picker before GPU READY).
+ */
+export async function fetchManthanModelCatalog(input: {
   baseURL: string
   apiKey?: string
   headers?: Record<string, string>
   timeoutMs?: number
-}): Promise<Map<string, ManthanModelPolicy>> {
-  const out = new Map<string, ManthanModelPolicy>()
+}): Promise<Map<string, ManthanModelCatalogEntry> | null> {
+  const out = new Map<string, ManthanModelCatalogEntry>()
   const base = input.baseURL.replace(/\/+$/, "")
-  if (!base) return out
+  if (!base) return null
   const headers: Record<string, string> = { Accept: "application/json", ...(input.headers ?? {}) }
   if (input.apiKey && !headerLookup(headers, "authorization")) {
     headers.Authorization = `Bearer ${input.apiKey}`
@@ -78,20 +220,49 @@ export async function fetchManthanModelPolicies(input: {
     headers,
     signal: AbortSignal.timeout(input.timeoutMs ?? 4000),
   })
-  if (!res.ok) return out
+  if (!res.ok) return null
   const body = (await res.json()) as { data?: unknown[]; models?: unknown[] }
   const rows = Array.isArray(body.data) ? body.data : Array.isArray(body.models) ? body.models : []
   for (const row of rows) {
     if (!row || typeof row !== "object") continue
     const r = row as Record<string, unknown>
-    const id = typeof r.id === "string" ? r.id : ""
+    const id = typeof r.id === "string" ? r.id.trim() : ""
     if (!id) continue
+    if (isManthanInternalSidecarModelId(id)) continue
+    // API lists capability-gated presets with available:false + reason.
+    if (r.available === false) continue
+    const workers = Number(r.workers)
     const context_limit = Number(r.context_length ?? r.context_window ?? 0)
     const compaction_threshold = Number(r.compaction_threshold)
+    const output_limit = Number(r.max_tokens)
+    const name = typeof r.name === "string" && r.name.trim() ? r.name.trim() : undefined
     out.set(normalizeManthanModelId(id), {
+      id,
+      name,
+      workers: Number.isFinite(workers) ? workers : undefined,
       context_limit: Number.isFinite(context_limit) && context_limit > 0 ? context_limit : 0,
       compaction_threshold:
         Number.isFinite(compaction_threshold) && compaction_threshold > 0 ? compaction_threshold : null,
+      output_limit: Number.isFinite(output_limit) && output_limit > 0 ? output_limit : undefined,
+    })
+  }
+  return out
+}
+
+/** @deprecated Prefer fetchManthanModelCatalog — kept for callers that only need policies. */
+export async function fetchManthanModelPolicies(input: {
+  baseURL: string
+  apiKey?: string
+  headers?: Record<string, string>
+  timeoutMs?: number
+}): Promise<Map<string, ManthanModelPolicy>> {
+  const catalog = await fetchManthanModelCatalog(input)
+  const out = new Map<string, ManthanModelPolicy>()
+  if (!catalog) return out
+  for (const [key, entry] of catalog) {
+    out.set(key, {
+      context_limit: entry.context_limit,
+      compaction_threshold: entry.compaction_threshold,
     })
   }
   return out
@@ -99,7 +270,7 @@ export async function fetchManthanModelPolicies(input: {
 
 export function applyManthanModelPolicies(
   models: Record<string, ManthanModelPatch>,
-  policies: Map<string, ManthanModelPolicy>,
+  policies: Map<string, Pick<ManthanModelPolicy, "context_limit" | "compaction_threshold">>,
 ): number {
   let n = 0
   for (const [id, model] of Object.entries(models)) {
@@ -114,6 +285,107 @@ export function applyManthanModelPolicies(
     }
     if (p.compaction_threshold != null) {
       model.options = { ...(model.options ?? {}), compaction_threshold: p.compaction_threshold }
+    }
+  }
+  return n
+}
+
+/**
+ * Add any live /v1/models ids missing from the provider catalog so the OpenCode
+ * model picker lists every READY Manthan pool model (not only static config).
+ * Does not overwrite existing config entries.
+ */
+export function ensureManthanModelsFromCatalog(
+  models: Record<string, ManthanModelPatch>,
+  catalog: Map<string, ManthanModelCatalogEntry>,
+  meta: { providerID: string; npm: string; url: string },
+): number {
+  let added = 0
+  const known = new Set<string>()
+  for (const [id, model] of Object.entries(models)) {
+    known.add(normalizeManthanModelId(id))
+    if (model.api?.id) known.add(normalizeManthanModelId(model.api.id))
+    if (model.id) known.add(normalizeManthanModelId(model.id))
+  }
+  for (const [key, entry] of catalog) {
+    if (isManthanInternalSidecarModelId(entry.id) || isManthanInternalSidecarModelId(key)) continue
+    if (known.has(key)) continue
+    const id = entry.id
+    models[id] = {
+      id,
+      providerID: meta.providerID,
+      name: entry.name ?? id,
+      api: { id, url: meta.url, npm: meta.npm },
+      status: "active",
+      headers: {},
+      options:
+        entry.compaction_threshold != null ? { compaction_threshold: entry.compaction_threshold } : {},
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      limit: {
+        context: entry.context_limit > 0 ? entry.context_limit : 65536,
+        output: entry.output_limit ?? 4096,
+      },
+      capabilities: {
+        temperature: true,
+        reasoning: true,
+        attachment: false,
+        toolcall: true,
+        input: { text: true, audio: false, image: false, video: false, pdf: false },
+        output: { text: true, audio: false, image: false, video: false, pdf: false },
+        interleaved: { field: "reasoning_content" },
+      },
+      family: "",
+      release_date: "",
+      variants: {},
+    }
+    known.add(key)
+    added++
+  }
+  return added
+}
+
+function modelMatchesManthanCatalog(
+  id: string,
+  model: ManthanModelPatch | undefined,
+  catalog: Map<string, ManthanModelCatalogEntry>,
+): boolean {
+  const keys = [
+    normalizeManthanModelId(id),
+    model?.id ? normalizeManthanModelId(model.id) : "",
+    model?.api?.id ? normalizeManthanModelId(model.api.id) : "",
+  ].filter(Boolean)
+  return keys.some((k) => catalog.has(k))
+}
+
+/**
+ * After a successful live catalog fetch: drop static config stubs that are not
+ * currently online (Gemma/Qwen/etc. presets with no READY workers).
+ */
+export function pruneManthanModelsToLiveCatalog(
+  models: Record<string, ManthanModelPatch>,
+  catalog: Map<string, ManthanModelCatalogEntry>,
+): number {
+  let n = 0
+  for (const id of Object.keys(models)) {
+    if (modelMatchesManthanCatalog(id, models[id], catalog)) continue
+    delete models[id]
+    n++
+  }
+  return n
+}
+
+/** Drop sidecar/helper ids that may still be present in static provider config. */
+export function pruneManthanSidecarModels(models: Record<string, ManthanModelPatch>): number {
+  let n = 0
+  for (const id of Object.keys(models)) {
+    const model = models[id]
+    if (
+      isManthanInternalSidecarModelId(id) ||
+      (model?.id && isManthanInternalSidecarModelId(model.id)) ||
+      (model?.api?.id && isManthanInternalSidecarModelId(model.api.id))
+    ) {
+      delete models[id]
+      n++
     }
   }
   return n
@@ -180,7 +452,8 @@ function asReasoningEffort(v: unknown): string | undefined {
 
 /**
  * Resolve Laguna/Manthan reasoning effort for a request.
- * Never leave this unset — llama/API default to `low` when the field is missing.
+ * Product default is `medium`. Prefer explicit UI/agent/variant controls over
+ * static model `options.reasoningEffort` stubs (often leftover `"none"`/`"low"`).
  */
 export function manthanReasoningEffort(input: {
   userVariant?: string
@@ -198,8 +471,6 @@ export function manthanReasoningEffort(input: {
     input.agent?.variant,
     input.agent?.options?.reasoningEffort,
     input.agent?.options?.reasoning_effort,
-    input.options?.reasoning_effort,
-    input.options?.reasoningEffort,
     input.variant?.reasoning_effort,
     input.variant?.reasoningEffort,
     header,

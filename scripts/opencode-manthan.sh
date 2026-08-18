@@ -13,4 +13,6 @@ ROOT="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
 cd "$ROOT"
 export OPENCODE_LAUNCH_CWD="${OPENCODE_LAUNCH_CWD:-$LAUNCH_CWD}"
 export PWD="$OPENCODE_LAUNCH_CWD"
+# TUI treats this as Manthan-first: no recent/config auto-pick; Home opens /models.
+export OPENCODE_MANTHAN_MODE="${OPENCODE_MANTHAN_MODE:-1}"
 exec bun run --cwd packages/opencode --conditions=browser src/index.ts "$@"

@@ -164,7 +164,19 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     const defaultModel = () => {
       const defaults = providers.default()
-      for (const provider of providers.connected()) {
+      const connected = providers.connected()
+      // Prefer Manthan over OpenCode Zen / big-pickle when the pool provider is connected.
+      const ordered = [
+        ...connected.filter((provider) => {
+          const id = provider.id.toLowerCase()
+          return id === "manthan" || id.startsWith("manthan/")
+        }),
+        ...connected.filter((provider) => {
+          const id = provider.id.toLowerCase()
+          return !(id === "manthan" || id.startsWith("manthan/"))
+        }),
+      ]
+      for (const provider of ordered) {
         const configured = defaults[provider.id]
         if (configured) {
           const model = { providerID: provider.id, modelID: configured }

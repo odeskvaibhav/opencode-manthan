@@ -14,6 +14,9 @@ import { useTuiConfig } from "../config"
 import { useTheme } from "../context/theme"
 import { HomeSessionDestinationProvider } from "./home/session-destination"
 import { useManthanChatWarmup } from "./home/manthan-chat-warmup"
+import { useDialog } from "../ui/dialog"
+import { DialogModel } from "../component/dialog-model"
+import { findManthanProvider, hasManthanProvider, isManthanLaunchMode } from "../util/manthan-context"
 
 let once = false
 const placeholder = {
@@ -41,6 +44,7 @@ function HomeInner() {
   const dimensions = useTerminalDimensions()
   const tuiConfig = useTuiConfig()
   const { theme } = useTheme()
+  const dialog = useDialog()
   const warmup = useManthanChatWarmup()
   const promptMaxWidth = createMemo(() => {
     const configured = tuiConfig.prompt?.max_width
@@ -48,6 +52,7 @@ function HomeInner() {
     return configured ?? 75
   })
   let sent = false
+  let modelPickerOpened = false
 
   onMount(() => {
     editor.clearSelection()
@@ -77,6 +82,25 @@ function HomeInner() {
     if (r.current.input !== args.prompt) return
     sent = true
     r.submit()
+  })
+
+  // Manthan: always open the model picker once on fresh home (Cmd+Esc / session.new).
+  // Never skip because Laguna is already in recent / provider_default / residual
+  // agent model — clear first, then DialogModel. Live /v1/models must be non-empty
+  // (findManthanProvider). Skip only for explicit CLI --model / --prompt.
+  createEffect(() => {
+    if (modelPickerOpened) return
+    if (!sync.ready || !local.model.ready) return
+    if (args.prompt || args.model) return
+    if (!isManthanLaunchMode() && !hasManthanProvider(sync.data.provider)) return
+    const manthan = findManthanProvider(sync.data.provider)
+    if (!manthan || Object.keys(manthan.models).length === 0) return
+    modelPickerOpened = true
+    local.model.clear()
+    const providerID = manthan.id
+    queueMicrotask(() => {
+      dialog.replace(() => <DialogModel providerID={providerID} />)
+    })
   })
 
   return (

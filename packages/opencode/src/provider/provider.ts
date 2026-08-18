@@ -31,7 +31,15 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
-import { applyManthanModelPolicies, fetchManthanModelPolicies, isManthanProviderID } from "./manthan"
+import {
+  applyManthanModelPolicies,
+  ensureManthanModelsFromCatalog,
+  fetchManthanModelCatalog,
+  isManthanConfig,
+  isManthanProviderID,
+  pruneManthanModelsToLiveCatalog,
+  pruneManthanSidecarModels,
+} from "./manthan"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 300_000
 
@@ -1616,14 +1624,28 @@ const layer = Layer.effect(
             const baseURL = typeof opts.baseURL === "string" ? opts.baseURL : ""
             if (!baseURL) continue
             try {
-              const policies = await fetchManthanModelPolicies({
+              const catalog = await fetchManthanModelCatalog({
                 baseURL,
                 apiKey: typeof opts.apiKey === "string" ? opts.apiKey : provider.key,
                 headers: (opts.headers as Record<string, string> | undefined) ?? undefined,
               })
-              applyManthanModelPolicies(provider.models, policies)
+              if (catalog && catalog.size > 0) {
+                applyManthanModelPolicies(provider.models, catalog)
+                ensureManthanModelsFromCatalog(provider.models, catalog, {
+                  providerID: id,
+                  npm:
+                    (Object.values(provider.models)[0]?.api.npm as string | undefined) ||
+                    "@ai-sdk/openai-compatible",
+                  url: baseURL,
+                })
+                pruneManthanSidecarModels(provider.models)
+                pruneManthanModelsToLiveCatalog(provider.models, catalog)
+              } else {
+                pruneManthanSidecarModels(provider.models)
+              }
             } catch {
-              // keep config limits if /v1/models is unreachable
+              // keep config catalog if /v1/models is unreachable
+              pruneManthanSidecarModels(provider.models)
             }
           }
         })
@@ -2024,9 +2046,14 @@ const layer = Layer.effect(
 
     const defaultModel = Effect.fn("Provider.defaultModel")(function* () {
       const cfg = yield* config.get()
-      if (cfg.model) return parseModel(cfg.model)
-
       const s = yield* InstanceState.get(state)
+
+      // Only honor config.model when it still exists (sidecar pins are pruned).
+      if (cfg.model) {
+        const parsed = parseModel(cfg.model)
+        if (s.providers[parsed.providerID]?.models[parsed.modelID]) return parsed
+      }
+
       const recent = yield* fs.readJson(path.join(Global.Path.state, "model.json")).pipe(
         Effect.map((x): { providerID: ProviderV2.ID; modelID: ModelV2.ID }[] => {
           if (!isRecord(x) || !Array.isArray(x.recent)) return []
@@ -2044,6 +2071,20 @@ const layer = Layer.effect(
         if (!provider) continue
         if (!provider.models[entry.modelID]) continue
         return { providerID: entry.providerID, modelID: entry.modelID }
+      }
+
+      // Manthan mode: never fall through to OpenCode Zen / big-pickle.
+      if (isManthanConfig(cfg)) {
+        const manthan = Object.values(s.providers).find((p) => isManthanProviderID(p.id))
+        if (manthan) {
+          const [model] = sort(Object.values(manthan.models))
+          if (model) {
+            return {
+              providerID: manthan.id,
+              modelID: model.id,
+            }
+          }
+        }
       }
 
       const configured = Object.keys(cfg.provider ?? {})

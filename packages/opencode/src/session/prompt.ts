@@ -15,7 +15,7 @@ import {
   peekToolLoopPivot,
   takeToolLoopPivot,
 } from "./loop-detection"
-
+import { isWarmupOrCapabilityAsk, userAskText } from "./warmup-text"
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
@@ -675,8 +675,18 @@ const layer = Layer.effect(
       }
 
       const model = input.model ?? ag.model ?? (yield* currentModel(input.sessionID))
+      const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const requestedVariant = input.variant && input.variant !== "default" ? input.variant : undefined
-      const agentVariant = ag.variant && ag.variant !== "default" ? ag.variant : undefined
+      // Agent variant only applies when using the agent's own model (not an override).
+      const agentVariant =
+        same && ag.variant && ag.variant !== "default"
+          ? yield* provider
+              .getModel(model.providerID, model.modelID)
+              .pipe(
+                Effect.map((full) => (full.variants?.[ag.variant!] ? ag.variant : undefined)),
+                Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)),
+              )
+          : undefined
       const variant = requestedVariant ?? agentVariant
 
       const info: SessionV1.User = {
@@ -1303,7 +1313,14 @@ const layer = Layer.effect(
             const promptOps = yield* ops()
             // Forced text-only recovery after a tool-loop pivot threshold.
             const toolLoopPivot = takeToolLoopPivot(sessionID)
+            // New Chat warmup / capability greets: Laguna often answers, then
+            // calls bash/grep (e.g. pwd), then restates the intro. Keep tools
+            // in the request so KV/tools prefill still pays, but force
+            // tool_choice=none and never continue the agent loop for this ask.
+            const warmupTextOnly = isWarmupOrCapabilityAsk(userAskText(lastUserMsg?.parts ?? []))
+            const textOnly = Boolean(toolLoopPivot) || warmupTextOnly
 
+            // Pivot strips tools entirely. Warmup keeps them (prefill) + toolChoice none.
             const tools = toolLoopPivot
               ? ({} as Record<string, AITool>)
               : yield* SessionTools.resolve({
@@ -1365,7 +1382,7 @@ const layer = Layer.effect(
               ],
               tools,
               model,
-              toolChoice: toolLoopPivot ? "none" : format.type === "json_schema" ? "required" : undefined,
+              toolChoice: textOnly ? "none" : format.type === "json_schema" ? "required" : undefined,
             })
 
             if (structured !== undefined) {
@@ -1400,6 +1417,8 @@ const layer = Layer.effect(
             }
 
             if (result === "stop") return "break" as const
+            // Capability/warmup ask: one assistant turn only (no tool-loop rematch).
+            if (warmupTextOnly) return "break" as const
             if (result === "pivot") {
               const info = peekToolLoopPivot(sessionID) ?? { tool: "tool", count: 0 }
               const continueMsg = yield* sessions.updateMessage({

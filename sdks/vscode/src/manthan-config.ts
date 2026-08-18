@@ -8,15 +8,25 @@ export function manthanCliCommand(binary: string, port: number, directory?: stri
 export type ManthanSettings = {
   baseUrl: string
   apiKey: string
+  /** Optional preferred model; omit / empty so OpenCode picker is not locked. */
   model: string
   binary: string
   showPowerFields: boolean
+  /** Open VS Code tabs when Manthan creates/edits files (SSE `file.edited` / tool parts). */
+  openFilesOnEdit: boolean
+  /** Auto-close tabs we opened after the edit settles (skipped if dirty / pre-existing). */
+  autoCloseEditedFiles: boolean
+  /** Edit-range highlight hold ms (0 = off). */
+  editHighlightMs: number
+  /** When true, open-on-edit steals editor focus from the terminal. */
+  openOnEditStealFocus: boolean
 }
 
 /** Build OPENCODE_CONFIG_CONTENT JSON for Option A Manthan profile. */
 export function buildManthanConfigContent(settings: ManthanSettings): string {
   const headers: Record<string, string> = {
     "X-Manthan-Client": "opencode",
+    "X-Manthan-Reasoning-Effort": "medium",
     "X-Title": "Manthan",
     "HTTP-Referer": "https://manthan.ai",
   }
@@ -24,13 +34,40 @@ export function buildManthanConfigContent(settings: ManthanSettings): string {
     headers.Authorization = `Bearer ${settings.apiKey}`
     headers["x-api-key"] = settings.apiKey
   }
-  const modelId = settings.model.replace(/^manthan\//, "")
-  const config = {
+  const modelId = settings.model.replace(/^manthan\//, "").trim()
+  const models =
+    modelId.length > 0
+      ? {
+          [modelId]: {
+            name: settings.model,
+            tool_call: true,
+            reasoning: true,
+            interleaved: { field: "reasoning_content" },
+            limit: { context: 65536, output: 4096 },
+            options: { reasoningEffort: "medium" },
+            variants: {
+              none: { reasoningEffort: "none" },
+              low: { reasoningEffort: "low" },
+              medium: { reasoningEffort: "medium" },
+              high: { reasoningEffort: "high" },
+            },
+          },
+        }
+      : {}
+  const agentEffort = {
+    variant: "medium",
+    options: { reasoningEffort: "medium" },
+  }
+  const config: Record<string, unknown> = {
     $schema: "https://opencode.ai/config.json",
-    model: settings.model,
     compaction: {
       auto: false,
       prune: false,
+    },
+    agent: {
+      build: { ...agentEffort },
+      plan: { ...agentEffort },
+      code: { ...agentEffort },
     },
     provider: {
       manthan: {
@@ -44,17 +81,14 @@ export function buildManthanConfigContent(settings: ManthanSettings): string {
           chunkTimeout: 900_000,
           headers,
         },
-        models: {
-          [modelId]: {
-            name: settings.model,
-            tool_call: true,
-            reasoning: true,
-            interleaved: { field: "reasoning_content" },
-            limit: { context: 65536, output: 4096 },
-          },
-        },
+        models,
       },
     },
+  }
+  // Only pin when the caller explicitly set a model; otherwise OpenCode lists
+  // provider.models + live GET /v1/models and the user picks via /models.
+  if (settings.model.trim()) {
+    config.model = settings.model.trim()
   }
   return JSON.stringify(config)
 }

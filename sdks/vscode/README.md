@@ -58,6 +58,21 @@ Friend laptop (clone → config → extension): **[INSTALL.md](../../INSTALL.md)
 
 Shows Manthan `context_used` / `%` from CLI `session.metadata.manthan`. Enable `manthan.showPowerFields` for fresh / reuse / epoch.
 
+## Open on edit (interactive)
+
+Default **on** (`manthan.openFilesOnEdit`): when Manthan creates/edits a file, VS Code opens it beside the terminal (focus stays in the terminal unless `manthan.openOnEditStealFocus`).
+
+| Case | Cursor / highlight |
+|------|--------------------|
+| Edit | Center-reveal change range; temporary find-match line highlight (strong → soft → clear) |
+| Create | EOF; highlight last N lines when write content length is known |
+
+`manthan.autoCloseEditedFiles` (default on) closes tabs the extension opened after the highlight fades (also on session idle). Does **not** close dirty tabs or files you already had open.
+
+`manthan.editHighlightMs` (default `1100`, `0` = off) sets how long the highlight holds.
+
+Turn settings off under **Manthan: Open settings** if you want a quieter editor.
+
 ## Tracker
 
 `infer-pool/docs/opencode-manthan-first-class-plan.md`

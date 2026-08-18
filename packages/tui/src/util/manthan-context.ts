@@ -5,6 +5,172 @@
 
 import { number as compactNumber } from "./locale"
 
+/** Provider id looks like Manthan (matches packages/opencode provider/manthan). */
+export function isManthanProviderID(id: string | undefined | null): boolean {
+  if (!id) return false
+  const s = id.toLowerCase()
+  return s === "manthan" || s.startsWith("manthan/") || /(^|\/)manthan(\/|$)/.test(s)
+}
+
+/** True when a Manthan provider id is present (models may still be empty / loading). */
+export function hasManthanProvider(providers: readonly { id: string }[]): boolean {
+  return providers.some((p) => isManthanProviderID(p.id))
+}
+
+/** VS Code / `opencode-manthan.sh` set this so TUI can treat the session as Manthan-first. */
+export function isManthanLaunchMode(): boolean {
+  const raw = process.env.OPENCODE_MANTHAN_MODE
+  return raw === "1" || raw === "true"
+}
+
+export function gpuWakeLabel(status: string | undefined): string {
+  if (!status || status === "ready") return ""
+  if (status === "capped") return "GPU cap reached — queued"
+  if (status === "queued") return "Queued for GPU…"
+  return "Waking GPU…"
+}
+
+/** POST /v1/workers/ensure-ready after the user picks a Manthan model (not on picker open). */
+export function manthanEnsureReadyRequest(provider: {
+  id: string
+  key?: string
+  options?: Record<string, unknown>
+}): { url: string; headers: Record<string, string> } | null {
+  if (!isManthanProviderID(provider.id)) return null
+  const opts = provider.options ?? {}
+  const base = typeof opts.baseURL === "string" ? opts.baseURL.replace(/\/+$/, "") : ""
+  if (!base) return null
+  const headers: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json" }
+  if (opts.headers && typeof opts.headers === "object") {
+    for (const [k, v] of Object.entries(opts.headers as Record<string, unknown>)) {
+      if (typeof v === "string" && v) headers[k] = v
+    }
+  }
+  const apiKey = typeof opts.apiKey === "string" ? opts.apiKey : provider.key
+  const hasAuth = Object.keys(headers).some((k) => k.toLowerCase() === "authorization")
+  if (apiKey && !hasAuth) headers.Authorization = `Bearer ${apiKey}`
+  if (!Object.keys(headers).some((k) => k.toLowerCase() === "x-manthan-client")) {
+    headers["X-Manthan-Client"] = "opencode"
+  }
+  return { url: `${base}/workers/ensure-ready`, headers }
+}
+
+let gpuHeartbeat: ReturnType<typeof setInterval> | null = null
+
+export function wakeManthanGpuFromProvider(provider: {
+  id: string
+  key?: string
+  options?: Record<string, unknown>
+}): void {
+  const req = manthanEnsureReadyRequest(provider)
+  if (!req) return
+  void fetch(req.url, {
+    method: "POST",
+    headers: req.headers,
+    body: JSON.stringify({ reason: "launch" }),
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => undefined)
+  startManthanGpuHeartbeat(provider)
+}
+
+export function startManthanGpuHeartbeat(provider: {
+  id: string
+  key?: string
+  options?: Record<string, unknown>
+}): void {
+  if (gpuHeartbeat) return
+  const req = manthanEnsureReadyRequest(provider)
+  if (!req) return
+  gpuHeartbeat = setInterval(() => {
+    void fetch(req.url, {
+      method: "POST",
+      headers: req.headers,
+      body: JSON.stringify({ reason: "heartbeat" }),
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => undefined)
+  }, 30_000)
+  if (typeof gpuHeartbeat === "object" && gpuHeartbeat && "unref" in gpuHeartbeat) {
+    gpuHeartbeat.unref()
+  }
+}
+
+export function stopManthanGpuHeartbeat(): void {
+  if (gpuHeartbeat) clearInterval(gpuHeartbeat)
+  gpuHeartbeat = null
+}
+
+/** OpenCode process exiting — drop wake so the reconciler does not spawn another G4. */
+export function leaveManthanGpuFromProvider(provider: {
+  id: string
+  key?: string
+  options?: Record<string, unknown>
+}): void {
+  stopManthanGpuHeartbeat()
+  const req = manthanEnsureReadyRequest(provider)
+  if (!req) return
+  void fetch(req.url, {
+    method: "POST",
+    headers: req.headers,
+    body: JSON.stringify({ reason: "leave" }),
+    signal: AbortSignal.timeout(3000),
+    keepalive: true,
+  }).catch(() => undefined)
+}
+
+/** Cold G4 + vLLM load often exceeds 4–8 min. */
+export const GPU_WAIT_MS = 12 * 60_000
+/** Prefill timeout; reset on each prompt_progress event. */
+export const WARMUP_IDLE_MS = 8 * 60_000
+
+export async function waitForManthanGpuFromProvider(
+  provider: { id: string; key?: string; options?: Record<string, unknown> },
+  opts?: {
+    timeoutMs?: number
+    pollMs?: number
+    cancelled?: () => boolean
+    onStatus?: (label: string) => void
+  },
+): Promise<"ready" | "capped" | "timeout"> {
+  const req = manthanEnsureReadyRequest(provider)
+  if (!req) return "ready"
+  const deadline = Date.now() + (opts?.timeoutMs ?? GPU_WAIT_MS)
+  const pollMs = opts?.pollMs ?? 2000
+  let first = true
+  while (Date.now() < deadline) {
+    if (opts?.cancelled?.()) return "timeout"
+    try {
+      const res = await fetch(req.url, {
+        method: "POST",
+        headers: req.headers,
+        body: JSON.stringify({ reason: first ? "launch" : "heartbeat" }),
+        signal: AbortSignal.timeout(8000),
+      })
+      first = false
+      if (res.ok) {
+        const body = (await res.json()) as { status?: string; ready?: boolean }
+        if (body.ready === true || body.status === "ready") return "ready"
+        if (body.status === "capped") {
+          opts?.onStatus?.(gpuWakeLabel("capped"))
+          return "capped"
+        }
+        const line = gpuWakeLabel(body.status)
+        if (line) opts?.onStatus?.(line)
+      }
+    } catch {
+      /* retry until deadline */
+    }
+    await new Promise((r) => setTimeout(r, pollMs))
+  }
+  return "timeout"
+}
+
+/** First connected Manthan provider with at least one model. */
+export function findManthanProvider<T extends { id: string; models: Record<string, unknown> }>(
+  providers: readonly T[],
+): T | undefined {
+  return providers.find((p) => isManthanProviderID(p.id) && Object.keys(p.models).length > 0)
+}
+
 export type ManthanCompactMarker = {
   messageID: string
   epoch: number
