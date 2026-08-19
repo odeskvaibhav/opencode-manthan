@@ -340,6 +340,129 @@ export function ensureManthanReasoningVariants(
   return n
 }
 
+export type ManthanThinkEmit = { reasoning?: string; content?: string }
+
+/**
+ * Live split for Qwen3-Thinking content leaks (`</think>` closer-only).
+ * Agent should already route these to reasoning_content; this is defense-in-depth
+ * so OpenCode never paints think body as the assistant answer.
+ */
+export function createManthanThinkContentGate(opts?: { assumeThinking?: boolean }) {
+  const CLOSE = "</think>"
+  const OPEN = "<think>"
+  let inThink = opts?.assumeThinking === true
+  let carry = ""
+
+  const stripTags = (text: string) => text.replace(/<\/?think>/gi, "")
+
+  const endsWithPrefix = (s: string, needle: string): number => {
+    const lower = s.toLowerCase()
+    const n = needle.toLowerCase()
+    for (let len = Math.min(lower.length, n.length - 1); len >= 1; len--) {
+      if (n.startsWith(lower.slice(-len))) return len
+    }
+    return 0
+  }
+
+  const pushEmit = (out: ManthanThinkEmit[], kind: "reasoning" | "content", text: string) => {
+    if (!text) return
+    const last = out[out.length - 1]
+    if (last && last[kind] != null && Object.keys(last).length === 1) {
+      last[kind] += text
+      return
+    }
+    out.push(kind === "reasoning" ? { reasoning: text } : { content: text })
+  }
+
+  return {
+    noteUpstreamReasoning() {
+      inThink = false
+    },
+    push(raw: string): ManthanThinkEmit[] {
+      if (!raw) return []
+      const out: ManthanThinkEmit[] = []
+      let s = carry + raw
+      carry = ""
+      while (s.length > 0) {
+        if (inThink) {
+          const idx = s.toLowerCase().indexOf(CLOSE.toLowerCase())
+          if (idx >= 0) {
+            pushEmit(out, "reasoning", s.slice(0, idx))
+            s = s.slice(idx + CLOSE.length)
+            inThink = false
+            continue
+          }
+          const hold = endsWithPrefix(s, CLOSE)
+          if (hold > 0) {
+            pushEmit(out, "reasoning", s.slice(0, -hold))
+            carry = s.slice(-hold)
+            break
+          }
+          pushEmit(out, "reasoning", s)
+          s = ""
+          continue
+        }
+        const openIdx = s.toLowerCase().indexOf(OPEN.toLowerCase())
+        const closeIdx = s.toLowerCase().indexOf(CLOSE.toLowerCase())
+        if (openIdx >= 0 && (closeIdx < 0 || openIdx < closeIdx)) {
+          pushEmit(out, "content", stripTags(s.slice(0, openIdx)))
+          s = s.slice(openIdx + OPEN.length)
+          inThink = true
+          continue
+        }
+        if (closeIdx >= 0) {
+          pushEmit(out, "reasoning", s.slice(0, closeIdx))
+          s = s.slice(closeIdx + CLOSE.length)
+          inThink = false
+          continue
+        }
+        const hold = Math.max(endsWithPrefix(s, OPEN), endsWithPrefix(s, CLOSE))
+        if (hold > 0) {
+          pushEmit(out, "content", stripTags(s.slice(0, -hold)))
+          carry = s.slice(-hold)
+          break
+        }
+        pushEmit(out, "content", stripTags(s))
+        s = ""
+      }
+      return out
+    },
+    flush(): ManthanThinkEmit[] {
+      if (!carry) return []
+      const held = carry
+      carry = ""
+      return this.push(held)
+    },
+  }
+}
+
+/** One-shot salvage for complete assistant text (Qwen closer-only or paired tags). */
+export function extractManthanThinkLeak(text: string): { reasoning: string; content: string } {
+  if (!text) return { reasoning: "", content: "" }
+  const parts: string[] = []
+  let content = text
+    .replace(/Thinking budget reached\s*[—\-]\s*answering now\.?\s*/gi, "")
+    .replace(/<think>([\s\S]*?)<\/think>/gi, (_m, body: string) => {
+      const t = String(body || "").trim()
+      if (t) parts.push(t)
+      return ""
+    })
+  if (parts.length === 0) {
+    let last = -1
+    const re = /<\/think>/gi
+    let m: RegExpExecArray | null
+    while ((m = re.exec(content)) !== null) last = m.index
+    if (last >= 0) {
+      const before = content.slice(0, last).trim()
+      const after = content.slice(last).replace(/<\/think>/i, "")
+      if (before) parts.push(before)
+      content = after
+    }
+  }
+  content = content.replace(/<\/?think>/gi, "").replace(/^\s+/, "")
+  return { reasoning: parts.join("\n\n").trim(), content }
+}
+
 /**
  * Add any live /v1/models ids missing from the provider catalog so the OpenCode
  * model picker lists every READY Manthan pool model (not only static config).

@@ -8,6 +8,8 @@ import {
   ensureManthanClientHeaders,
   ensureManthanModelsFromCatalog,
   ensureManthanReasoningVariants,
+  createManthanThinkContentGate,
+  extractManthanThinkLeak,
   gpuWakeLabel,
   manthanReasoningVariants,
   formatManthanContextLabel,
@@ -183,6 +185,14 @@ describe("manthan Option A", () => {
     expect(manthanReasoningVariants().medium).toMatchObject({
       reasoningEffort: "medium",
     })
+  })
+
+  test("createManthanThinkContentGate keeps think body off the answer channel", () => {
+    const g = createManthanThinkContentGate({ assumeThinking: true })
+    expect(g.push("The user asked who I am.\n")).toEqual([{ reasoning: "The user asked who I am.\n" }])
+    expect(g.push("</think>\nI'm Manthan.")).toEqual([{ content: "\nI'm Manthan." }])
+    expect(extractManthanThinkLeak("plan</think>\nHi").content).toBe("Hi")
+    expect(extractManthanThinkLeak("plan</think>\nHi").reasoning).toBe("plan")
   })
 
   test("sidecar helper models stay hidden from OpenCode picker", () => {

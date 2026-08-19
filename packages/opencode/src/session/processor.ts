@@ -32,6 +32,8 @@ import {
   requestManthanCompact,
   isManthanProviderID,
   manthanClientCompactAllowed,
+  createManthanThinkContentGate,
+  extractManthanThinkLeak,
 } from "@/provider/manthan"
 import { NotFoundError } from "@/storage/storage"
 import {
@@ -115,6 +117,14 @@ const layer = Layer.effect(
       // may execute tools internally before emitting start-step events,
       // so capturing inside the event handler can be too late.
       const initialSnapshot = yield* snapshot.track()
+      const manthanProvider =
+        isManthanProviderID(input.assistantMessage.providerID) || isManthanProviderID(input.model.providerID)
+      const manthanThink = manthanProvider
+        ? createManthanThinkContentGate({
+            assumeThinking: input.model.capabilities?.reasoning === true,
+          })
+        : null
+      const manthanLeakReasoningKey = "manthan-think-leak"
       const ctx: ProcessorContext = {
         assistantMessage: input.assistantMessage,
         sessionID: input.sessionID,
@@ -128,6 +138,66 @@ const layer = Layer.effect(
         reasoningMap: {},
       }
       let aborted = false
+
+      const appendManthanLeakReasoning = Effect.fn("SessionProcessor.appendManthanLeakReasoning")(
+        function* (text: string) {
+          if (!text) return
+          if (!(manthanLeakReasoningKey in ctx.reasoningMap)) {
+            ctx.reasoningMap[manthanLeakReasoningKey] = {
+              id: PartID.ascending(),
+              messageID: ctx.assistantMessage.id,
+              sessionID: ctx.assistantMessage.sessionID,
+              type: "reasoning",
+              text: "",
+              time: { start: Date.now() },
+            }
+            yield* session.updatePart(ctx.reasoningMap[manthanLeakReasoningKey])
+          }
+          ctx.reasoningMap[manthanLeakReasoningKey].text += text
+          yield* session.updatePartDelta({
+            sessionID: ctx.reasoningMap[manthanLeakReasoningKey].sessionID,
+            messageID: ctx.reasoningMap[manthanLeakReasoningKey].messageID,
+            partID: ctx.reasoningMap[manthanLeakReasoningKey].id,
+            field: "text",
+            delta: text,
+          })
+        },
+      )
+
+      const appendAssistantText = Effect.fn("SessionProcessor.appendAssistantText")(function* (
+        text: string,
+        providerMetadata?: Record<string, unknown>,
+      ) {
+        if (!text) return
+        if (!ctx.currentText) {
+          ctx.currentText = {
+            id: PartID.ascending(),
+            messageID: ctx.assistantMessage.id,
+            sessionID: ctx.assistantMessage.sessionID,
+            type: "text",
+            text: "",
+            time: { start: Date.now() },
+            metadata: providerMetadata,
+          }
+          yield* session.updatePart(ctx.currentText)
+        }
+        const next = stripLeakedToolMarkup(ctx.currentText.text + text)
+        if (next === ctx.currentText.text) return
+        const delta = next.startsWith(ctx.currentText.text) ? next.slice(ctx.currentText.text.length) : null
+        ctx.currentText.text = next
+        if (providerMetadata) ctx.currentText.metadata = providerMetadata
+        if (delta) {
+          yield* session.updatePartDelta({
+            sessionID: ctx.currentText.sessionID,
+            messageID: ctx.currentText.messageID,
+            partID: ctx.currentText.id,
+            field: "text",
+            delta,
+          })
+        } else {
+          yield* session.updatePart(ctx.currentText)
+        }
+      })
 
       const parse = (e: unknown) =>
         MessageV2.fromError(e, {
@@ -304,6 +374,7 @@ const layer = Layer.effect(
         switch (value.type) {
           case "reasoning-start":
             if (value.id in ctx.reasoningMap) return
+            manthanThink?.noteUpstreamReasoning()
             ctx.reasoningMap[value.id] = {
               id: PartID.ascending(),
               messageID: ctx.assistantMessage.id,
@@ -319,6 +390,7 @@ const layer = Layer.effect(
           case "reasoning-delta":
             // Match dev: silently drop orphan deltas (no preceding reasoning-start).
             if (!(value.id in ctx.reasoningMap)) return
+            manthanThink?.noteUpstreamReasoning()
             ctx.reasoningMap[value.id].text += value.text
             if (value.providerMetadata) ctx.reasoningMap[value.id].metadata = value.providerMetadata
             yield* session.updatePartDelta({
@@ -578,6 +650,9 @@ const layer = Layer.effect(
           }
 
           case "text-start":
+            // Manthan think-gate may route leading deltas to reasoning; create the
+            // text part lazily when answer content arrives.
+            if (manthanThink) return
             ctx.currentText = {
               id: PartID.ascending(),
               messageID: ctx.assistantMessage.id,
@@ -591,6 +666,15 @@ const layer = Layer.effect(
             return
 
           case "text-delta": {
+            if (manthanThink) {
+              for (const piece of manthanThink.push(value.text)) {
+                if (piece.reasoning) yield* appendManthanLeakReasoning(piece.reasoning)
+                if (piece.content) {
+                  yield* appendAssistantText(piece.content, value.providerMetadata)
+                }
+              }
+              return
+            }
             if (!ctx.currentText) return
             const next = stripLeakedToolMarkup(ctx.currentText.text + value.text)
             if (next === ctx.currentText.text) return
@@ -612,9 +696,20 @@ const layer = Layer.effect(
           }
 
           case "text-end":
+            if (manthanThink) {
+              for (const piece of manthanThink.flush()) {
+                if (piece.reasoning) yield* appendManthanLeakReasoning(piece.reasoning)
+                if (piece.content) yield* appendAssistantText(piece.content)
+              }
+            }
             if (!ctx.currentText) return
             // oxlint-disable-next-line no-self-assign -- reactivity trigger
             ctx.currentText.text = stripLeakedToolMarkup(ctx.currentText.text)
+            if (manthanProvider) {
+              const leaked = extractManthanThinkLeak(ctx.currentText.text)
+              if (leaked.reasoning) yield* appendManthanLeakReasoning(leaked.reasoning)
+              ctx.currentText.text = leaked.content
+            }
             ctx.currentText.text = stripLeakedToolMarkup(
               (yield* plugin.trigger(
                 "experimental.text.complete",
@@ -632,6 +727,9 @@ const layer = Layer.effect(
             }
             if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
             yield* session.updatePart(ctx.currentText)
+            if (manthanLeakReasoningKey in ctx.reasoningMap) {
+              yield* finishReasoning(manthanLeakReasoningKey)
+            }
             ctx.currentText = undefined
             return
 
@@ -657,8 +755,21 @@ const layer = Layer.effect(
         }
 
         if (ctx.currentText) {
+          if (manthanThink) {
+            for (const piece of manthanThink.flush()) {
+              if (piece.reasoning) yield* appendManthanLeakReasoning(piece.reasoning)
+              if (piece.content) {
+                ctx.currentText.text = stripLeakedToolMarkup(ctx.currentText.text + piece.content)
+              }
+            }
+          }
           const end = Date.now()
           ctx.currentText.text = stripLeakedToolMarkup(ctx.currentText.text)
+          if (manthanProvider) {
+            const leaked = extractManthanThinkLeak(ctx.currentText.text)
+            if (leaked.reasoning) yield* appendManthanLeakReasoning(leaked.reasoning)
+            ctx.currentText.text = leaked.content
+          }
           ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
           yield* session.updatePart(ctx.currentText)
           ctx.currentText = undefined
