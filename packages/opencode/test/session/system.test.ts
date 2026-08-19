@@ -97,7 +97,7 @@ describe("session.system", () => {
     } as Provider.Model)[0]
     expect(text).toContain("You are Manthan")
     expect(text).toMatch(/what you can do/i)
-    expect(text).toMatch(/Do not search the repo/i)
+    expect(text).toMatch(/Do not call any tools/i)
     expect(text).not.toMatch(/^You are opencode/i)
   })
 
