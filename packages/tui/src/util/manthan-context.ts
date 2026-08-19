@@ -429,7 +429,7 @@ export const WARMUP_ROTATE_LINES = [
   "The tokens are tokening.",
 ] as const
 
-export function nextWarmupRotateLine(prev?: string | null): string {
+export function nextWarmupRotateLine(prev?: string | null): (typeof WARMUP_ROTATE_LINES)[number] {
   const strip = String(prev ?? "")
     .replace(/\s*\(\d+%\)$/, "")
     .trim()

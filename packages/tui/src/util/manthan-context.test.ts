@@ -35,7 +35,7 @@ describe("tui manthan context", () => {
     ]
     expect(findManthanProvider(providers)?.id).toBe("manthan")
     expect(findManthanProvider([{ id: "manthan", models: {} }])).toBeUndefined()
-    expect(hasManthanProvider([{ id: "manthan", models: {} }])).toBe(true)
+    expect(hasManthanProvider([{ id: "manthan" }])).toBe(true)
     expect(hasManthanProvider([{ id: "opencode" }])).toBe(false)
   })
 
@@ -45,7 +45,7 @@ describe("tui manthan context", () => {
     globalThis.fetch = (async (_url: string, init?: RequestInit) => {
       calls.push(String(init?.body ?? ""))
       return new Response("{}", { status: 200 })
-    }) as typeof fetch
+    }) as unknown as typeof fetch
     try {
       leaveManthanGpuFromProvider({ id: "manthan", key: "k", options: { baseURL: "http://x/v1" } })
       await new Promise((r) => setTimeout(r, 10))
@@ -63,7 +63,7 @@ describe("tui manthan context", () => {
       return new Response(JSON.stringify({ ready: n > 1, status: n > 1 ? "ready" : "waking" }), {
         status: 200,
       })
-    }) as typeof fetch
+    }) as unknown as typeof fetch
     try {
       const r = await waitForManthanGpuFromProvider(
         { id: "manthan", key: "k", options: { baseURL: "http://x/v1" } },
