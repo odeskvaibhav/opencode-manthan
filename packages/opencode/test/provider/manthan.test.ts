@@ -133,7 +133,10 @@ describe("manthan Option A", () => {
   })
 
   test("ensureManthanModelsFromCatalog adds missing /v1/models ids", () => {
-    const models: Record<string, { id?: string; limit: { context: number }; api?: { id?: string } }> = {
+    const models: Record<
+      string,
+      { id?: string; limit: { context: number }; api?: { id?: string }; variants?: Record<string, unknown> }
+    > = {
       "laguna-xs-2.1-sharded": {
         id: "laguna-xs-2.1-sharded",
         limit: { context: 65536 },

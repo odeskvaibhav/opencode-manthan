@@ -329,7 +329,7 @@ export function ensureManthanReasoningVariants(
   const defaults = manthanReasoningVariants()
   let n = 0
   for (const [id, model] of Object.entries(models)) {
-    if (isManthanInternalSidecarModelId(id) || isManthanInternalSidecarModelId(model.id)) {
+    if (isManthanInternalSidecarModelId(id) || (model.id && isManthanInternalSidecarModelId(model.id))) {
       continue
     }
     if (!modelWantsManthanEffortVariants(model)) continue

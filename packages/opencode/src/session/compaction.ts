@@ -551,8 +551,10 @@ const layer = Layer.effect(
       if (processor.message.error) return "stop"
       if (result === "continue") {
         yield* events.publish(Event.Compacted, { sessionID: input.sessionID })
+        return "continue"
       }
-      return result
+      // Processor may also return "pivot"; treat as stop for the compaction contract.
+      return "stop"
     })
 
     const create = Effect.fn("SessionCompaction.create")(function* (input: {
