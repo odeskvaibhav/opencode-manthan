@@ -172,9 +172,10 @@ it.instance(
     const providers = yield* list
     expect(providers[ProviderV2.ID.anthropic]).toBeDefined()
     const models = Object.keys(providers[ProviderV2.ID.anthropic].models)
-    expect(models).not.toContain("claude-sonnet-4-20250514")
+    expect(models).not.toContain("claude-sonnet-4-5")
+    expect(models).toContain("claude-sonnet-4-6")
   }),
-  { config: { provider: { anthropic: { blacklist: ["claude-sonnet-4-20250514"] } } } },
+  { config: { provider: { anthropic: { blacklist: ["claude-sonnet-4-5"] } } } },
 )
 
 it.instance(
@@ -189,7 +190,7 @@ it.instance(
   {
     config: {
       provider: {
-        anthropic: { models: { "my-alias": { id: "claude-sonnet-4-20250514", name: "My Custom Alias" } } },
+        anthropic: { models: { "my-alias": { id: "claude-sonnet-4-6", name: "My Custom Alias" } } },
       },
     },
   },
@@ -362,9 +363,9 @@ it.instance(
     yield* setProcessEnv("ANTHROPIC_API_KEY", "test-api-key")
     const model = yield* Provider.use.defaultModel()
     expect(String(model.providerID)).toBe("anthropic")
-    expect(String(model.modelID)).toBe("claude-sonnet-4-20250514")
+    expect(String(model.modelID)).toBe("claude-sonnet-4-6")
   }),
-  { config: { model: "anthropic/claude-sonnet-4-20250514" } },
+  { config: { model: "anthropic/claude-sonnet-4-6" } },
 )
 
 it.instance(
@@ -496,7 +497,7 @@ it.instance(
     config: {
       provider: {
         anthropic: {
-          models: { "my-sonnet": { id: "claude-sonnet-4-20250514", name: "My Sonnet Alias" } },
+          models: { "my-sonnet": { id: "claude-sonnet-4-6", name: "My Sonnet Alias" } },
         },
       },
     },
@@ -903,7 +904,7 @@ it.instance(
     config: {
       provider: {
         anthropic: {
-          models: { sonnet: { id: "claude-sonnet-4-20250514" } },
+          models: { sonnet: { id: "claude-sonnet-4-6" } },
         },
       },
     },
@@ -963,7 +964,7 @@ it.instance(
   Effect.gen(function* () {
     yield* set("ANTHROPIC_API_KEY", "test-api-key")
     const providers = yield* list
-    const model = providers[ProviderV2.ID.anthropic].models["claude-sonnet-4-20250514"]
+    const model = providers[ProviderV2.ID.anthropic].models["claude-sonnet-4-6"]
     expect(model.cost.input).toBe(999)
     expect(model.cost.output).toBe(888)
   }),
@@ -971,7 +972,7 @@ it.instance(
     config: {
       provider: {
         anthropic: {
-          models: { "claude-sonnet-4-20250514": { cost: { input: 999, output: 888 } } },
+          models: { "claude-sonnet-4-6": { cost: { input: 999, output: 888 } } },
         },
       },
     },

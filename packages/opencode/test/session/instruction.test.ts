@@ -86,7 +86,7 @@ function loaded(filepath: string): SessionV1.WithParts[] {
         agent: "build",
         model: {
           providerID: ProviderV2.ID.make("anthropic"),
-          modelID: ModelV2.ID.make("claude-sonnet-4-20250514"),
+          modelID: ModelV2.ID.make("claude-sonnet-4-6"),
         },
       },
       parts: [
