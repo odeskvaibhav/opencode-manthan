@@ -291,6 +291,56 @@ export function applyManthanModelPolicies(
 }
 
 /**
+ * OpenCode effort chip (none/low/medium/high) for Manthan models.
+ * Live catalog inject used to set `variants: {}`, which hides the chip.
+ */
+export function manthanReasoningVariants(): Record<string, Record<string, unknown>> {
+  const efforts = ["none", "low", "medium", "high"] as const
+  return Object.fromEntries(
+    efforts.map((effort) => [
+      effort,
+      {
+        reasoningEffort: effort,
+        reasoning_effort: effort,
+        body: { reasoning_effort: effort },
+        headers: { "X-Manthan-Reasoning-Effort": effort },
+        options: {
+          reasoningEffort: effort,
+          headers: { "X-Manthan-Reasoning-Effort": effort },
+        },
+      },
+    ]),
+  )
+}
+
+function modelWantsManthanEffortVariants(model: ManthanModelPatch): boolean {
+  if (model.capabilities?.reasoning === true) return true
+  if (model.capabilities?.reasoning === false) return false
+  const id = `${model.id ?? ""} ${model.api?.id ?? ""}`
+  return /laguna|north|qwen3\.(5|6)|qwen3-next.*thinking|gemma-4|devstral-small-2507|puzzle/i.test(
+    id,
+  )
+}
+
+/** Fill empty `variants` so the thinking-budget chip appears for reasoning models. */
+export function ensureManthanReasoningVariants(
+  models: Record<string, ManthanModelPatch>,
+): number {
+  const defaults = manthanReasoningVariants()
+  let n = 0
+  for (const [id, model] of Object.entries(models)) {
+    if (isManthanInternalSidecarModelId(id) || isManthanInternalSidecarModelId(model.id)) {
+      continue
+    }
+    if (!modelWantsManthanEffortVariants(model)) continue
+    if (model.variants && Object.keys(model.variants).length > 0) continue
+    model.variants = { ...defaults }
+    n++
+  }
+  return n
+}
+
+/**
  * Add any live /v1/models ids missing from the provider catalog so the OpenCode
  * model picker lists every READY Manthan pool model (not only static config).
  * Does not overwrite existing config entries.
@@ -307,6 +357,7 @@ export function ensureManthanModelsFromCatalog(
     if (model.api?.id) known.add(normalizeManthanModelId(model.api.id))
     if (model.id) known.add(normalizeManthanModelId(model.id))
   }
+  const effortVariants = manthanReasoningVariants()
   for (const [key, entry] of catalog) {
     if (isManthanInternalSidecarModelId(entry.id) || isManthanInternalSidecarModelId(key)) continue
     if (known.has(key)) continue
@@ -336,7 +387,7 @@ export function ensureManthanModelsFromCatalog(
       },
       family: "",
       release_date: "",
-      variants: {},
+      variants: { ...effortVariants },
     }
     known.add(key)
     added++

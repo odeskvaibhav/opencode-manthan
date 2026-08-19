@@ -7,7 +7,9 @@ import {
   consumeManthanCompact,
   ensureManthanClientHeaders,
   ensureManthanModelsFromCatalog,
+  ensureManthanReasoningVariants,
   gpuWakeLabel,
+  manthanReasoningVariants,
   formatManthanContextLabel,
   isManthanConfig,
   isManthanInternalSidecarModelId,
@@ -150,7 +152,34 @@ describe("manthan Option A", () => {
     ).toBe(1)
     expect(models["qwen3.6-27b-sharded"]?.id).toBe("qwen3.6-27b-sharded")
     expect(models["qwen3.6-27b-sharded"]?.limit.context).toBe(65536)
+    expect(Object.keys(models["qwen3.6-27b-sharded"]?.variants ?? {})).toEqual([
+      "none",
+      "low",
+      "medium",
+      "high",
+    ])
     expect(Object.keys(models)).toHaveLength(2)
+  })
+
+  test("ensureManthanReasoningVariants fills empty variants for thinking models", () => {
+    const models: Record<string, any> = {
+      "qwen3-next-80b-a3b-thinking": {
+        id: "qwen3-next-80b-a3b-thinking",
+        limit: { context: 65536 },
+        capabilities: { reasoning: true },
+        variants: {},
+      },
+    }
+    expect(ensureManthanReasoningVariants(models)).toBe(1)
+    expect(Object.keys(models["qwen3-next-80b-a3b-thinking"].variants)).toEqual([
+      "none",
+      "low",
+      "medium",
+      "high",
+    ])
+    expect(manthanReasoningVariants().medium).toMatchObject({
+      reasoningEffort: "medium",
+    })
   })
 
   test("sidecar helper models stay hidden from OpenCode picker", () => {

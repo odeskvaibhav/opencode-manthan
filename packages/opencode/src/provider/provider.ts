@@ -34,6 +34,7 @@ import { ProviderError } from "./error"
 import {
   applyManthanModelPolicies,
   ensureManthanModelsFromCatalog,
+  ensureManthanReasoningVariants,
   fetchManthanModelCatalog,
   isManthanConfig,
   isManthanProviderID,
@@ -1640,8 +1641,10 @@ const layer = Layer.effect(
                 })
                 pruneManthanSidecarModels(provider.models)
                 pruneManthanModelsToLiveCatalog(provider.models, catalog)
+                ensureManthanReasoningVariants(provider.models)
               } else {
                 pruneManthanSidecarModels(provider.models)
+                ensureManthanReasoningVariants(provider.models)
               }
             } catch {
               // keep config catalog if /v1/models is unreachable
