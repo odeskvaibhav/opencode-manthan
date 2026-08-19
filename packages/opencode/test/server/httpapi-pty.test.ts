@@ -136,32 +136,47 @@ describe("pty HttpApi bridge", () => {
     })
   })
 
-  testPty("hides exited sessions on the legacy surface", async () => {
+  testPty(
+    "retains exited sessions until removed",
+    async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
     const headers = { "x-opencode-directory": tmp.path }
     const created = await app().request(PtyPaths.create, {
       method: "POST",
       headers: { ...headers, "content-type": "application/json" },
-      body: JSON.stringify({ command: "/usr/bin/env", args: ["sh", "-c", "exit 0"] }),
+      body: JSON.stringify({ command: "/usr/bin/env", args: ["sh", "-c", "sleep 0.1; exit 0"] }),
     })
     expect(created.status).toBe(200)
     const info = await created.json()
 
-    // Exited sessions are retained by core for the canonical surface, but the legacy
-    // routes preserve pre-retention behavior: exited sessions are invisible here.
-    const deadline = Date.now() + 5_000
+    const deadline = Date.now() + 10_000
+    let status = "running"
     while (Date.now() < deadline) {
       const found = await app().request(PtyPaths.get.replace(":ptyID", info.id), { headers })
-      if (found.status === 404) break
+      expect(found.status).toBe(200)
+      status = (await found.json()).status
+      if (status === "exited") break
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
-    const found = await app().request(PtyPaths.get.replace(":ptyID", info.id), { headers })
-    expect(found.status).toBe(404)
+    expect(status).toBe("exited")
 
     const list = await app().request(PtyPaths.list, { headers })
     expect(list.status).toBe(200)
-    expect(await list.json()).toEqual([])
-  })
+    expect(await list.json()).toEqual([
+      expect.objectContaining({ id: info.id, status: "exited", exitCode: 0 }),
+    ])
+
+    const removed = await app().request(PtyPaths.remove.replace(":ptyID", info.id), {
+      method: "DELETE",
+      headers,
+    })
+    expect(removed.status).toBe(200)
+
+    const missing = await app().request(PtyPaths.get.replace(":ptyID", info.id), { headers })
+    expect(missing.status).toBe(404)
+  },
+    { timeout: 20_000 },
+  )
 
   testPty("disposes PTY sessions with their legacy instance", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })

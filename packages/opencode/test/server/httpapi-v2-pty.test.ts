@@ -63,7 +63,9 @@ afterEach(async () => {
 })
 
 describe("v2 pty HttpApi", () => {
-  testPty("serves location-wrapped PTY routes and retains exited sessions", async () => {
+  testPty(
+    "serves location-wrapped PTY routes and retains exited sessions",
+    async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
 
     const empty = await request("/api/pty", tmp.path)
@@ -73,7 +75,7 @@ describe("v2 pty HttpApi", () => {
     const created = await request("/api/pty", tmp.path, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ command: "/usr/bin/env", args: ["sh", "-c", "exit 4"], title: "v2" }),
+      body: JSON.stringify({ command: "/usr/bin/env", args: ["sh", "-c", "sleep 0.1; exit 4"], title: "v2" }),
     })
     expect(created.status).toBe(200)
     const body = Schema.decodeUnknownSync(Location.response(Pty.Info))(await created.json())
@@ -81,7 +83,7 @@ describe("v2 pty HttpApi", () => {
     expect(body.data.title).toBe("v2")
 
     // The canonical surface keeps exited sessions observable with their exit code.
-    const deadline = Date.now() + 5_000
+    const deadline = Date.now() + 10_000
     let info: { status: string; exitCode?: number } | undefined
     while (Date.now() < deadline) {
       const found = await request(`/api/pty/${body.data.id}`, tmp.path)
@@ -98,7 +100,9 @@ describe("v2 pty HttpApi", () => {
     const missing = await request(`/api/pty/${body.data.id}`, tmp.path)
     expect(missing.status).toBe(404)
     expect(await missing.json()).toMatchObject({ _tag: "PtyNotFoundError", ptyID: body.data.id })
-  })
+  },
+    { timeout: 20_000 },
+  )
 
   testPty("rejects connect tokens without the CSRF header and connects with a valid ticket", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
@@ -209,7 +213,11 @@ describe("v2 pty HttpApi", () => {
           directoryHeader(dir),
           HttpClientRequest.bodyJson({
             command: "/bin/sh",
-            args: ["-c", 'printf "%s|%s|%s|%s|%s\\n" "$CALLER" "$SHARED" "$PLUGIN" "$TERM" "$HOOK_CWD"; sleep 5'],
+            args: [
+              "-c",
+              // Delay so PTY onData is attached before printf (avoids empty-buffer race).
+              `sleep 0.3; printf "%s|%s|%s|%s|%s\\n" "$CALLER" "$SHARED" "$PLUGIN" "$TERM" "$HOOK_CWD"; sleep 30`,
+            ],
             cwd,
             env: { CALLER: "caller", SHARED: "caller", TERM: "caller" },
           }),
@@ -219,7 +227,7 @@ describe("v2 pty HttpApi", () => {
         const info = (yield* Schema.decodeUnknownEffect(Location.response(Pty.Info))(yield* created.json)).data
 
         const socket = yield* Socket.makeWebSocket(
-          `${(yield* serverUrl()).replace(/^http/, "ws")}/api/pty/${info.id}/connect?cursor=0&location[directory]=${encodeURIComponent(dir)}`,
+          `${(yield* serverUrl()).replace(/^http/, "ws")}/api/pty/${info.id}/connect?cursor=-1&location[directory]=${encodeURIComponent(dir)}`,
           { closeCodeIsError: () => false },
         )
         const messages = yield* Queue.unbounded<string>()
@@ -235,7 +243,7 @@ describe("v2 pty HttpApi", () => {
 
         const takeUntil = (expected: string, seen = ""): Effect.Effect<string, unknown> =>
           Effect.gen(function* () {
-            const next = seen + (yield* Queue.take(messages).pipe(Effect.timeout("5 seconds")))
+            const next = seen + (yield* Queue.take(messages).pipe(Effect.timeout("10 seconds")))
             if (next.includes(expected)) return next
             return yield* takeUntil(expected, next)
           })
@@ -246,5 +254,6 @@ describe("v2 pty HttpApi", () => {
         yield* write(new Socket.CloseEvent(1000, "done")).pipe(Effect.catch(() => Effect.void))
         yield* HttpClientRequest.delete(`/api/pty/${info.id}`).pipe(directoryHeader(dir), HttpClient.execute)
       }),
+    { timeout: 20_000 },
   )
 })

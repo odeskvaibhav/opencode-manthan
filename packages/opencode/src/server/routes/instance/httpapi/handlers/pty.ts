@@ -35,9 +35,7 @@ const ticketScope = Effect.gen(function* () {
   return { directory: instance?.directory, workspaceID }
 })
 
-// Legacy surface compatibility: before exited-session retention, sessions vanished the moment
-// their process exited. These routes preserve that observable behavior — exited sessions are
-// invisible here — while the canonical /api/pty surface exposes them until removal.
+// Canonical /api/pty retains exited sessions until remove (Pty core EXITED_LIMIT).
 export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handlers) =>
   Effect.gen(function* () {
     const tickets = yield* PtyTicket.Service
@@ -62,8 +60,8 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
     })
 
     const list = Effect.fn("PtyHttpApi.list")(function* () {
-      const sessions = yield* pty(Pty.Service.use((service) => service.list()))
-      return sessions.filter((info) => info.status === "running")
+      // Canonical surface retains exited sessions until remove (see Pty core).
+      return yield* pty(Pty.Service.use((service) => service.list()))
     })
 
     const create = Effect.fn("PtyHttpApi.create")(function* (ctx: { payload: typeof Pty.CreateInput.Type }) {
@@ -91,15 +89,16 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
               message: `PTY session not found: ${error.ptyID}`,
             }),
         ),
-        Effect.flatMap((info) =>
-          info.status === "running"
-            ? Effect.succeed(info)
-            : new ApiError.PtyNotFoundError({
-                ptyID: ctx.params.ptyID,
-                message: `PTY session not found: ${ctx.params.ptyID}`,
-              }),
-        ),
       )
+    })
+
+    const requireRunning = Effect.fn("PtyHttpApi.requireRunning")(function* (ctx: { params: { ptyID: PtyID } }) {
+      const info = yield* get(ctx)
+      if (info.status === "running") return info
+      return yield* new ApiError.PtyNotFoundError({
+        ptyID: ctx.params.ptyID,
+        message: `PTY session not found: ${ctx.params.ptyID}`,
+      })
     })
 
     const update = Effect.fn("PtyHttpApi.update")(function* (ctx: {
@@ -145,7 +144,7 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
       const request = yield* HttpServerRequest.HttpServerRequest
       if (request.headers[PTY_CONNECT_TOKEN_HEADER] !== PTY_CONNECT_TOKEN_HEADER_VALUE || !validOrigin(request, cors))
         return yield* new ApiError.PtyForbiddenError({ message: "Invalid PTY connect token request" })
-      yield* get(ctx)
+      yield* requireRunning(ctx)
       return yield* tickets.issue({ ptyID: ctx.params.ptyID, ...(yield* ticketScope) })
     })
 
