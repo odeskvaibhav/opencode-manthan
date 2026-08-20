@@ -14,7 +14,7 @@ export type ManthanSettings = {
   showPowerFields: boolean
   /** Open VS Code tabs when Manthan creates/edits files (SSE `file.edited` / tool parts). */
   openFilesOnEdit: boolean
-  /** Auto-close tabs we opened after the edit settles (skipped if dirty / pre-existing). */
+  /** Auto-close tabs we opened after the edit settles (opt-in; skipped if dirty / pre-existing). */
   autoCloseEditedFiles: boolean
   /** Edit-range highlight hold ms (0 = off). */
   editHighlightMs: number

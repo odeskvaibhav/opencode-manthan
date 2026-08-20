@@ -102,6 +102,8 @@ type ManthanModelPatch = {
 export type ManthanGpuReady = {
   status: "ready" | "waking" | "queued" | "capped"
   ready: boolean
+  phase?: string
+  phaseInstance?: string | null
   lastError?: { message: string } | null
 }
 
@@ -110,6 +112,29 @@ export function gpuWakeLabel(status: string | undefined): string {
   if (status === "capped") return "GPU cap reached — queued"
   if (status === "queued") return "Queued for GPU…"
   return "Waking GPU…"
+}
+
+export function gpuWakePhaseLabel(input: {
+  status?: string
+  phase?: string | null
+  phaseInstance?: string | null
+  lastError?: { message?: string } | null
+}): string {
+  const name = input.phaseInstance?.trim()
+  const suffix = name ? ` (${name})` : ""
+  const phase = (input.phase || "").toLowerCase()
+  if (phase === "ready" || input.status === "ready") return ""
+  // Phase wins: status can still say capped while a VM is provisioning.
+  if (phase === "provisioning") return `Creating GPU VM…${suffix}`
+  if (phase === "booting") return `GPU VM booting…${suffix}`
+  if (phase === "agent") return `Loading model on GPU…${suffix}`
+  if (phase === "error") {
+    const msg = input.lastError?.message?.trim()
+    return msg ? `GPU error: ${msg.slice(0, 80)}` : "GPU error — check Fleet"
+  }
+  if (phase === "capped" || input.status === "capped") return "GPU cap reached — queued"
+  if (phase === "queued" || input.status === "queued") return "Queued for GPU…"
+  return name ? `Waking GPU…${suffix}` : "Waking GPU…"
 }
 
 export async function postManthanEnsureReady(input: {
@@ -132,6 +157,8 @@ export async function postManthanEnsureReady(input: {
     return {
       status: body.status || (body.ready ? "ready" : "waking"),
       ready: body.ready === true,
+      phase: body.phase,
+      phaseInstance: body.phaseInstance ?? null,
       lastError: body.lastError ?? null,
     }
   } catch {
@@ -183,8 +210,14 @@ export async function waitForManthanGpu(input: {
     }
     input.onStatus?.(snap)
     if (snap.ready || snap.status === "ready") return snap
-    if (snap.status === "capped") return snap
-    const line = gpuWakeLabel(snap.status)
+    const wakePhases = new Set(["provisioning", "booting", "agent", "waking"])
+    if (
+      (snap.status === "capped" || snap.phase === "capped") &&
+      !wakePhases.has(String(snap.phase || ""))
+    ) {
+      return snap
+    }
+    const line = gpuWakePhaseLabel(snap)
     if (line) {
       try {
         process.stderr.write(`\r${line}   `)
@@ -317,7 +350,7 @@ function modelWantsManthanEffortVariants(model: ManthanModelPatch): boolean {
   if (model.capabilities?.reasoning === true) return true
   if (model.capabilities?.reasoning === false) return false
   const id = `${model.id ?? ""} ${model.api?.id ?? ""}`
-  return /laguna|north|qwen3\.(5|6)|qwen3-next.*thinking|gemma-4|devstral-small-2507|puzzle/i.test(
+  return /laguna|north|qwen3\.(5|6)|qwen3-next.*thinking|gemma-4|devstral-small-2507|puzzle|gpt-oss/i.test(
     id,
   )
 }
@@ -347,11 +380,21 @@ export type ManthanThinkEmit = { reasoning?: string; content?: string }
  * Agent should already route these to reasoning_content; this is defense-in-depth
  * so OpenCode never paints think body as the assistant answer.
  */
+export function scrubManthanPostThinkContent(text: string): string {
+  if (!text) return ""
+  let c = text
+  c = c.replace(/^\s*[a-z]{1,4}\.\s*/u, "")
+  c = c.replace(/^\s*[a-z]{1,4}(?=\s*[\n\r])/u, "")
+  c = c.replace(/^[\n\r]+/, "")
+  return c
+}
+
 export function createManthanThinkContentGate(opts?: { assumeThinking?: boolean }) {
   const CLOSE = "</think>"
   const OPEN = "<think>"
   let inThink = opts?.assumeThinking === true
   let carry = ""
+  let scrubNextContent = false
 
   const stripTags = (text: string) => text.replace(/<\/?think>/gi, "")
 
@@ -366,12 +409,18 @@ export function createManthanThinkContentGate(opts?: { assumeThinking?: boolean 
 
   const pushEmit = (out: ManthanThinkEmit[], kind: "reasoning" | "content", text: string) => {
     if (!text) return
+    let t = text
+    if (kind === "content" && scrubNextContent) {
+      t = scrubManthanPostThinkContent(t)
+      if (!t) return
+      scrubNextContent = false
+    }
     const last = out[out.length - 1]
     if (last && last[kind] != null && Object.keys(last).length === 1) {
-      last[kind] += text
+      last[kind] += t
       return
     }
-    out.push(kind === "reasoning" ? { reasoning: text } : { content: text })
+    out.push(kind === "reasoning" ? { reasoning: t } : { content: t })
   }
 
   return {
@@ -390,6 +439,8 @@ export function createManthanThinkContentGate(opts?: { assumeThinking?: boolean 
             pushEmit(out, "reasoning", s.slice(0, idx))
             s = s.slice(idx + CLOSE.length)
             inThink = false
+            scrubNextContent = true
+            s = scrubManthanPostThinkContent(s)
             continue
           }
           const hold = endsWithPrefix(s, CLOSE)
@@ -414,6 +465,8 @@ export function createManthanThinkContentGate(opts?: { assumeThinking?: boolean 
           pushEmit(out, "reasoning", s.slice(0, closeIdx))
           s = s.slice(closeIdx + CLOSE.length)
           inThink = false
+          scrubNextContent = true
+          s = scrubManthanPostThinkContent(s)
           continue
         }
         const hold = Math.max(endsWithPrefix(s, OPEN), endsWithPrefix(s, CLOSE))
@@ -460,7 +513,10 @@ export function extractManthanThinkLeak(text: string): { reasoning: string; cont
     }
   }
   content = content.replace(/<\/?think>/gi, "").replace(/^\s+/, "")
-  return { reasoning: parts.join("\n\n").trim(), content }
+  return {
+    reasoning: parts.join("\n\n").trim(),
+    content: scrubManthanPostThinkContent(content),
+  }
 }
 
 /**

@@ -52,7 +52,7 @@ const DEFAULT_CLOSE_DELAY_MS = 1500
 
 /**
  * Subscribes to OpenCode `/event` and opens/reveals files Manthan edits.
- * Auto-closes tabs we opened once the edit settles, unless the user dirtied them.
+ * Optionally auto-closes tabs we opened once the edit settles (`autoClose`).
  */
 export class OpenOnEditController implements vscode.Disposable {
   private abort: AbortController | undefined

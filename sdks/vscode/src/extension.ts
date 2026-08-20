@@ -271,7 +271,7 @@ With **manthan.openFilesOnEdit** (default on), the extension listens to OpenCode
 - **Edit** → center-reveal and select the change range (diff hunk or \`oldString\`/\`newString\` match), with a brief find-match highlight (strong → soft → clear).
 - **Create** → cursor at last line; highlight spans new content when length is known.
 - Focus stays in the terminal unless **manthan.openOnEditStealFocus** is on.
-- **manthan.autoCloseEditedFiles** (default on) closes tabs *we* opened after the highlight fades (+~400ms), or on \`session.idle\`. Skips dirty / already-open tabs.
+- **manthan.autoCloseEditedFiles** (default off) closes tabs *we* opened after the highlight fades (+~400ms), or on \`session.idle\`. Edited/created files stay open unless you turn this on. Skips dirty / already-open tabs.
 - **manthan.editHighlightMs** (default 1100, \`0\` = off) controls highlight hold time.
 
 ## Docs

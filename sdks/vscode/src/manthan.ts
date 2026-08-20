@@ -25,7 +25,8 @@ export function readManthanSettings(): ManthanSettings {
     showPowerFields: cfg.get<boolean>("showPowerFields") === true,
     // Default on: interactive follow-along; turn off via Settings if noisy.
     openFilesOnEdit: cfg.get<boolean>("openFilesOnEdit") !== false,
-    autoCloseEditedFiles: cfg.get<boolean>("autoCloseEditedFiles") !== false,
+    // Default off: keep edited/created tabs open (opt in to auto-close).
+    autoCloseEditedFiles: cfg.get<boolean>("autoCloseEditedFiles") === true,
     editHighlightMs: (() => {
       const n = cfg.get<number>("editHighlightMs")
       if (n == null || !Number.isFinite(n)) return 1100

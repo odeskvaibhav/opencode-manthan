@@ -121,7 +121,11 @@ const layer = Layer.effect(
         isManthanProviderID(input.assistantMessage.providerID) || isManthanProviderID(input.model.providerID)
       const manthanThink = manthanProvider
         ? createManthanThinkContentGate({
-            assumeThinking: input.model.capabilities?.reasoning === true,
+            // Interleaved models (Laguna) already get reasoning_content from the
+            // API — assumeThinking would mis-route the answer into Thinking.
+            assumeThinking:
+              input.model.capabilities?.reasoning === true &&
+              !input.model.capabilities?.interleaved,
           })
         : null
       const manthanLeakReasoningKey = "manthan-think-leak"

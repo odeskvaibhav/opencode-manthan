@@ -30,6 +30,30 @@ export function gpuWakeLabel(status: string | undefined): string {
   return "Waking GPU…"
 }
 
+/** Prefer API `phase` (PROVISIONING/BOOTING/AGENT) over coarse status. */
+export function gpuWakePhaseLabel(input: {
+  status?: string
+  phase?: string | null
+  phaseInstance?: string | null
+  lastError?: { message?: string } | null
+}): string {
+  const name = input.phaseInstance?.trim()
+  const suffix = name ? ` (${name})` : ""
+  const phase = (input.phase || "").toLowerCase()
+  if (phase === "ready" || input.status === "ready") return ""
+  // Phase wins: status can still say capped while a VM is provisioning.
+  if (phase === "provisioning") return `Creating GPU VM…${suffix}`
+  if (phase === "booting") return `GPU VM booting…${suffix}`
+  if (phase === "agent") return `Loading model on GPU…${suffix}`
+  if (phase === "error") {
+    const msg = input.lastError?.message?.trim()
+    return msg ? `GPU error: ${msg.slice(0, 80)}` : "GPU error — check Fleet"
+  }
+  if (phase === "capped" || input.status === "capped") return "GPU cap reached — queued"
+  if (phase === "queued" || input.status === "queued") return "Queued for GPU…"
+  return name ? `Waking GPU…${suffix}` : "Waking GPU…"
+}
+
 /** POST /v1/workers/ensure-ready after the user picks a Manthan model (not on picker open). */
 export function manthanEnsureReadyRequest(provider: {
   id: string
@@ -147,13 +171,29 @@ export async function waitForManthanGpuFromProvider(
       })
       first = false
       if (res.ok) {
-        const body = (await res.json()) as { status?: string; ready?: boolean }
+        const body = (await res.json()) as {
+          status?: string
+          ready?: boolean
+          phase?: string
+          phaseInstance?: string | null
+          lastError?: { message?: string } | null
+        }
         if (body.ready === true || body.status === "ready") return "ready"
-        if (body.status === "capped") {
-          opts?.onStatus?.(gpuWakeLabel("capped"))
+        // Hard cap only when nothing is provisioning (phase wins over stale status).
+        const wakePhases = new Set(["provisioning", "booting", "agent", "waking"])
+        if (
+          (body.phase === "capped" || body.status === "capped") &&
+          !wakePhases.has(String(body.phase || ""))
+        ) {
+          opts?.onStatus?.(gpuWakePhaseLabel({ status: "capped", phase: "capped" }))
           return "capped"
         }
-        const line = gpuWakeLabel(body.status)
+        const line = gpuWakePhaseLabel({
+          status: body.status,
+          phase: body.phase,
+          phaseInstance: body.phaseInstance,
+          lastError: body.lastError,
+        })
         if (line) opts?.onStatus?.(line)
       }
     } catch {

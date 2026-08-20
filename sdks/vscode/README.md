@@ -67,7 +67,7 @@ Default **on** (`manthan.openFilesOnEdit`): when Manthan creates/edits a file, V
 | Edit | Center-reveal change range; temporary find-match line highlight (strong → soft → clear) |
 | Create | EOF; highlight last N lines when write content length is known |
 
-`manthan.autoCloseEditedFiles` (default on) closes tabs the extension opened after the highlight fades (also on session idle). Does **not** close dirty tabs or files you already had open.
+`manthan.autoCloseEditedFiles` (default off) keeps edited/created tabs open. Turn it on to close tabs the extension opened after the highlight fades (also on session idle). Does **not** close dirty tabs or files you already had open.
 
 `manthan.editHighlightMs` (default `1100`, `0` = off) sets how long the highlight holds.
 

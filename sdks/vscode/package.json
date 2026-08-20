@@ -63,8 +63,8 @@
         },
         "manthan.autoCloseEditedFiles": {
           "type": "boolean",
-          "default": true,
-          "description": "After Manthan finishes an edit, auto-close the tab we opened (after the edit highlight fades, or on session idle). Never closes dirty tabs or files you already had open."
+          "default": false,
+          "description": "After Manthan finishes an edit, auto-close the tab we opened (after the edit highlight fades, or on session idle). Off by default so edited/created files stay open. Never closes dirty tabs or files you already had open."
         },
         "manthan.editHighlightMs": {
           "type": "number",

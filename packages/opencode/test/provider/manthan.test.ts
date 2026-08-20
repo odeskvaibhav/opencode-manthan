@@ -11,6 +11,7 @@ import {
   createManthanThinkContentGate,
   extractManthanThinkLeak,
   gpuWakeLabel,
+  gpuWakePhaseLabel,
   manthanReasoningVariants,
   formatManthanContextLabel,
   isManthanConfig,
@@ -45,6 +46,22 @@ describe("manthan Option A", () => {
     expect(gpuWakeLabel("ready")).toBe("")
     expect(gpuWakeLabel("waking")).toBe("Waking GPU…")
     expect(gpuWakeLabel("capped")).toBe("GPU cap reached — queued")
+  })
+
+  test("gpuWakePhaseLabel uses instance phase", () => {
+    expect(gpuWakePhaseLabel({ phase: "provisioning", phaseInstance: "mth-acme-1" })).toBe(
+      "Creating GPU VM… (mth-acme-1)",
+    )
+    expect(gpuWakePhaseLabel({ phase: "booting", phaseInstance: "mth-acme-1" })).toBe(
+      "GPU VM booting… (mth-acme-1)",
+    )
+    expect(gpuWakePhaseLabel({ phase: "agent", phaseInstance: "mth-acme-1" })).toBe(
+      "Loading model on GPU… (mth-acme-1)",
+    )
+    expect(gpuWakePhaseLabel({ phase: "ready" })).toBe("")
+    expect(
+      gpuWakePhaseLabel({ status: "capped", phase: "provisioning", phaseInstance: "mth-x" }),
+    ).toBe("Creating GPU VM… (mth-x)")
   })
 
   test("isManthanProviderID matches manthan ids", () => {
@@ -190,9 +207,16 @@ describe("manthan Option A", () => {
   test("createManthanThinkContentGate keeps think body off the answer channel", () => {
     const g = createManthanThinkContentGate({ assumeThinking: true })
     expect(g.push("The user asked who I am.\n")).toEqual([{ reasoning: "The user asked who I am.\n" }])
-    expect(g.push("</think>\nI'm Manthan.")).toEqual([{ content: "\nI'm Manthan." }])
+    expect(g.push("</think>\nI'm Manthan.")).toEqual([{ content: "I'm Manthan." }])
     expect(extractManthanThinkLeak("plan</think>\nHi").content).toBe("Hi")
     expect(extractManthanThinkLeak("plan</think>\nHi").reasoning).toBe("plan")
+  })
+
+  test("createManthanThinkContentGate drops post-closer ct. crumb", () => {
+    const g = createManthanThinkContentGate({ assumeThinking: true })
+    expect(g.push("No tools calle")).toEqual([{ reasoning: "No tools calle" }])
+    expect(g.push("</think>ct.\nHi! I'm Manthan.")).toEqual([{ content: "Hi! I'm Manthan." }])
+    expect(extractManthanThinkLeak("calle</think>ct.\nHi!").content).toBe("Hi!")
   })
 
   test("sidecar helper models stay hidden from OpenCode picker", () => {
