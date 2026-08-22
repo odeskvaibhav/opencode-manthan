@@ -1181,6 +1181,156 @@ export function shouldManthanCompactAutocontinue(input: {
   return true
 }
 
+/** Max synthetic user turns after stop-without-tools on a build/fix task. */
+export const MANTHAN_TOOL_AVOIDANCE_CONTINUE_MAX = 2
+
+export const MANTHAN_TOOL_AVOIDANCE_CONTINUE_TEXT =
+  "You stopped without calling a tool. The build/fix task is not done. " +
+  "Immediately call bash, read, edit, or write — do not explain or plan in prose."
+
+type ManthanMsgWithParts = {
+  info: { role: string }
+  parts: Array<{
+    type: string
+    text?: string
+    synthetic?: boolean
+    tool?: string
+    metadata?: Record<string, unknown>
+    state?: {
+      status: string
+      output?: string
+      error?: string
+      metadata?: Record<string, unknown>
+    }
+  }>
+}
+
+export function manthanToolAvoidanceContinueEnabled(): boolean {
+  const v = process.env.OPENCODE_MANTHAN_TOOL_AVOIDANCE_CONTINUE
+  if (v === "0" || v === "false") return false
+  return true
+}
+
+export function userAskLooksLikeBuildFix(text: string): boolean {
+  const t = (text || "").replace(/\s+/g, " ").trim()
+  if (!t) return false
+  return /\b(fix|build|compile|type.?error|tsc|bun run|npm run|pnpm|yarn build|until exit 0|green build)\b/i.test(
+    t,
+  )
+}
+
+function bashToolOutputFailed(tool: string | undefined, state: ManthanMsgWithParts["parts"][0]["state"]): boolean {
+  if (!state) return false
+  if (state.status === "error") return true
+  if (state.status !== "completed") return false
+  const output = state.output || ""
+  const exit = state.metadata?.exit
+  if (typeof exit === "number" && exit !== 0) return true
+  if (/\[ERROR\]/i.test(output)) return true
+  if (/\berror TS\d+\b/i.test(output)) return true
+  if (/\bBuild failed\b/i.test(output)) return true
+  if (/\berror during build\b/i.test(output)) return true
+  if (/\[UNRESOLVED_IMPORT\]/i.test(output)) return true
+  if (/✗/.test(output) && /\bfailed\b/i.test(output)) return true
+  if (/failed/i.test(output) && /bash|shell|command/i.test(tool || "")) return true
+  return false
+}
+
+/** Most recent bash tool in session history failed. */
+export function sessionLastBashFailed(msgs: ManthanMsgWithParts[]): boolean {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]!
+    for (let j = m.parts.length - 1; j >= 0; j--) {
+      const p = m.parts[j]!
+      if (p.type !== "tool") continue
+      if (!/bash|shell|terminal|run_terminal/i.test(p.tool || "")) continue
+      return bashToolOutputFailed(p.tool, p.state)
+    }
+  }
+  return false
+}
+
+/** Non-synthetic root user ask (skips compact / avoidance continue messages). */
+export function rootUserAskFromMessages(msgs: ManthanMsgWithParts[]): string {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]!
+    if (m.info.role !== "user") continue
+    const synthetic = m.parts.some(
+      (p) =>
+        p.type === "text" &&
+        (p.metadata?.tool_avoidance_continue === true ||
+          p.metadata?.manthan_compact_continue === true ||
+          p.metadata?.compaction_continue === true),
+    )
+    if (synthetic) continue
+    return m.parts
+      .filter((p): p is { type: "text"; text: string; synthetic?: boolean } => p.type === "text" && !p.synthetic)
+      .map((p) => p.text)
+      .join("\n")
+      .trim()
+  }
+  return ""
+}
+
+export function countManthanToolAvoidanceContinues(msgs: ManthanMsgWithParts[]): number {
+  let count = 0
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]!
+    if (m.info.role !== "user") continue
+    const avoidance = m.parts.some(
+      (p) => p.type === "text" && p.metadata?.tool_avoidance_continue === true,
+    )
+    if (avoidance) count++
+    else break
+  }
+  return count
+}
+
+export function manthanToolAvoidanceContinueText(input: {
+  bashFailed: boolean
+  attempt: number
+}): string {
+  if (input.bashFailed) {
+    if (input.attempt >= 1) {
+      return (
+        "[MANTHAN] Build is still failing. Run bash to see errors, then edit or write to fix them. " +
+        "Call a tool now — no prose."
+      )
+    }
+    return (
+      "[MANTHAN] The last bash command failed. Fix the errors with edit/write, then rerun bash. " +
+      "Invoke a tool immediately — do not stop."
+    )
+  }
+  if (input.attempt >= 1) {
+    return (
+      "[MANTHAN] You stopped again without tools. Call bash, read, edit, or write now. " +
+      "Do not explain — emit the tool call."
+    )
+  }
+  return MANTHAN_TOOL_AVOIDANCE_CONTINUE_TEXT
+}
+
+export function shouldManthanToolAvoidanceAutocontinue(input: {
+  providerID: string
+  finish: string | undefined
+  error?: unknown
+  hasToolCalls: boolean
+  userAskText: string
+  continueCount: number
+  bashFailed: boolean
+}): boolean {
+  if (!manthanToolAvoidanceContinueEnabled()) return false
+  if (!isManthanProviderID(input.providerID)) return false
+  if (input.error) return false
+  if (input.hasToolCalls) return false
+  if (!input.finish || ["tool-calls", "unknown"].includes(input.finish)) return false
+  if (!["stop", "length"].includes(input.finish)) return false
+  if (input.continueCount >= MANTHAN_TOOL_AVOIDANCE_CONTINUE_MAX) return false
+  if (!userAskLooksLikeBuildFix(input.userAskText) && !input.bashFailed) return false
+  return true
+}
+
 export function manthanClientCompactAllowed(): boolean {
   return (
     process.env.OPENCODE_MANTHAN_ALLOW_CLIENT_COMPACT === "1" ||
@@ -1288,6 +1438,8 @@ export type ManthanContextUsage = {
   compact_markers?: ManthanCompactMarker[]
   compact_reason?: string | null
   compact_usage_before_percent?: number | null
+  compact_usage_before_tokens?: number | null
+  sidecar_route?: string | null
 }
 
 const pendingBySession = new Map<string, ManthanContextUsage>()
@@ -1357,7 +1509,49 @@ export function parseManthanContextHeaders(
       headers,
       "x-manthan-compact-usage-before-percent",
     ),
+    compact_usage_before_tokens: numHeader(headers, "x-manthan-compact-usage-before-tokens"),
+    sidecar_route: headerGet(headers, "x-manthan-sidecar-route") ?? null,
   }
+}
+
+/** `opencode run --format json` / soak runners (OPENCODE_MANTHAN_MODE=1). */
+export function isManthanLaunchMode(): boolean {
+  const raw = process.env.OPENCODE_MANTHAN_MODE
+  return raw === "1" || raw === "true"
+}
+
+/** Payload for JSONL `manthan_compact` events and stderr telemetry. */
+export type ManthanCompactJsonl = {
+  status: string
+  reason: string | null
+  context_used_after: number | null
+  context_used_before_tokens: number | null
+  usage_before_percent: number | null
+  sidecar_route: string | null
+  summary_preview: string | null
+  message_id?: string
+}
+
+export function buildManthanCompactJsonl(
+  usage: ManthanContextUsage,
+  opts?: { messageID?: string },
+): ManthanCompactJsonl | null {
+  if (usage.compaction_status !== "compacted") return null
+  const summary = usage.compact_summary?.trim() || null
+  return {
+    status: usage.compaction_status,
+    reason: usage.compact_reason ?? null,
+    context_used_after: usage.context_used,
+    context_used_before_tokens: usage.compact_usage_before_tokens ?? null,
+    usage_before_percent: usage.compact_usage_before_percent ?? null,
+    sidecar_route: usage.sidecar_route ?? null,
+    summary_preview: summary ? summary.slice(0, 800) : null,
+    ...(opts?.messageID ? { message_id: opts.messageID } : {}),
+  }
+}
+
+export function formatManthanCompactStderrLine(telemetry: ManthanCompactJsonl): string {
+  return `[manthan-compact] ${JSON.stringify(telemetry)}`
 }
 
 const SESSION_HEADER_KEYS = [

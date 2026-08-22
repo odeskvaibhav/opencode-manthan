@@ -745,6 +745,17 @@ export const RunCommand = effectCmd({
                 if (emit("step_finish", { part })) continue
               }
 
+              if (
+                part.type === "text" &&
+                part.metadata &&
+                typeof part.metadata === "object" &&
+                (part.metadata as Record<string, unknown>).manthan_compact === true
+              ) {
+                const compact = { ...(part.metadata as Record<string, unknown>) }
+                delete compact.manthan_compact
+                if (emit("manthan_compact", { part, compact })) continue
+              }
+
               if (part.type === "text" && part.time?.end) {
                 if (emit("text", { part })) continue
                 const text = part.text.trim()

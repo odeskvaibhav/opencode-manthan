@@ -32,6 +32,16 @@ import {
   sessionIDFromRequestHeaders,
   takeManthanContext,
   shouldManthanCompactAutocontinue,
+  shouldManthanToolAvoidanceAutocontinue,
+  userAskLooksLikeBuildFix,
+  sessionLastBashFailed,
+  countManthanToolAvoidanceContinues,
+  rootUserAskFromMessages,
+  manthanToolAvoidanceContinueText,
+  manthanClientCompactAllowed,
+  buildManthanCompactJsonl,
+  formatManthanCompactStderrLine,
+  isManthanLaunchMode,
   manthanSessionCancelUrl,
   rememberManthanCancelTarget,
   clearManthanCancelTarget,
@@ -450,6 +460,113 @@ describe("manthan Option A", () => {
     expect(shouldManthanCompactAutocontinue({ added: false, finish: "stop" })).toBe(false)
     expect(shouldManthanCompactAutocontinue({ added: true, finish: "tool-calls" })).toBe(false)
     expect(shouldManthanCompactAutocontinue({ added: true, finish: "stop", error: { name: "x" } })).toBe(false)
+  })
+
+  test("shouldManthanToolAvoidanceAutocontinue on build stop without tools", () => {
+    expect(
+      shouldManthanToolAvoidanceAutocontinue({
+        providerID: "manthan",
+        finish: "stop",
+        hasToolCalls: false,
+        userAskText: "Run bun run build and fix until exit 0",
+        continueCount: 0,
+        bashFailed: false,
+      }),
+    ).toBe(true)
+    expect(
+      shouldManthanToolAvoidanceAutocontinue({
+        providerID: "openai",
+        finish: "stop",
+        hasToolCalls: false,
+        userAskText: "fix the build",
+        continueCount: 0,
+        bashFailed: true,
+      }),
+    ).toBe(false)
+    expect(
+      shouldManthanToolAvoidanceAutocontinue({
+        providerID: "manthan",
+        finish: "stop",
+        hasToolCalls: true,
+        userAskText: "fix build",
+        continueCount: 0,
+        bashFailed: true,
+      }),
+    ).toBe(false)
+    expect(
+      shouldManthanToolAvoidanceAutocontinue({
+        providerID: "manthan",
+        finish: "stop",
+        hasToolCalls: false,
+        userAskText: "explain this file",
+        continueCount: 0,
+        bashFailed: false,
+      }),
+    ).toBe(false)
+    expect(
+      shouldManthanToolAvoidanceAutocontinue({
+        providerID: "manthan",
+        finish: "stop",
+        hasToolCalls: false,
+        userAskText: "fix build",
+        continueCount: 2,
+        bashFailed: true,
+      }),
+    ).toBe(false)
+  })
+
+  test("sessionLastBashFailed detects TS build errors", () => {
+    const failed = sessionLastBashFailed([
+      {
+        info: { role: "assistant" },
+        parts: [
+          {
+            type: "tool",
+            tool: "bash",
+            state: {
+              status: "completed",
+              output: "error TS6133: unused import",
+              metadata: { exit: 2 },
+            },
+          },
+        ],
+      },
+    ])
+    expect(failed).toBe(true)
+  })
+
+  test("countManthanToolAvoidanceContinues counts trailing synthetic users", () => {
+    const msgs = [
+      { info: { role: "user" }, parts: [{ type: "text", text: "fix build" }] },
+      {
+        info: { role: "user" },
+        parts: [{ type: "text", text: "continue", metadata: { tool_avoidance_continue: true } }],
+      },
+    ]
+    expect(countManthanToolAvoidanceContinues(msgs)).toBe(1)
+    expect(rootUserAskFromMessages(msgs)).toBe("fix build")
+    expect(userAskLooksLikeBuildFix("bun run build until green")).toBe(true)
+    expect(manthanToolAvoidanceContinueText({ bashFailed: true, attempt: 0 })).toContain("bash")
+  })
+
+  test("buildManthanCompactJsonl for compacted responses", () => {
+    const usage = parseManthanContextHeaders({
+      "x-manthan-context-used": "901",
+      "x-manthan-compaction-status": "compacted",
+      "x-manthan-compact-reason": "threshold",
+      "x-manthan-compact-usage-before-tokens": "70530",
+      "x-manthan-compact-usage-before-percent": "100",
+      "x-manthan-sidecar-route": "compact_summary",
+      "x-manthan-compact-summary-b64": Buffer.from("Current task: explore repo").toString("base64"),
+    })
+    expect(usage).not.toBeNull()
+    const row = buildManthanCompactJsonl(usage!, { messageID: "msg_1" })
+    expect(row?.status).toBe("compacted")
+    expect(row?.reason).toBe("threshold")
+    expect(row?.context_used_after).toBe(901)
+    expect(row?.context_used_before_tokens).toBe(70530)
+    expect(row?.summary_preview).toContain("explore repo")
+    expect(formatManthanCompactStderrLine(row!)).toContain("[manthan-compact]")
   })
 
   test("manthanSessionCancelUrl maps chat completions to sessions/cancel", () => {

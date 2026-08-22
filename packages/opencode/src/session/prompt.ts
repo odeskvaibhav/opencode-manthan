@@ -9,7 +9,7 @@ import { SessionRevert } from "./revert"
 import { Session } from "./session"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
-import { isManthanProviderID, manthanClientCompactAllowed, MANTHAN_COMPACT_CONTINUE_TEXT, requestManthanCompact } from "@/provider/manthan"
+import { isManthanProviderID, manthanClientCompactAllowed, MANTHAN_COMPACT_CONTINUE_TEXT, requestManthanCompact, shouldManthanToolAvoidanceAutocontinue, manthanToolAvoidanceContinueText, rootUserAskFromMessages, countManthanToolAvoidanceContinues, sessionLastBashFailed } from "@/provider/manthan"
 import {
   buildToolLoopPivotSteerText,
   peekToolLoopPivot,
@@ -1160,6 +1160,48 @@ const layer = Layer.effect(
                 tool: orphan.tool,
                 callID: orphan.callID,
               })
+            }
+            const rootAsk = rootUserAskFromMessages(msgs)
+            const bashFailed = sessionLastBashFailed(msgs)
+            const avoidanceContinues = countManthanToolAvoidanceContinues(msgs)
+            if (
+              shouldManthanToolAvoidanceAutocontinue({
+                providerID: lastUser.model.providerID,
+                finish: lastAssistant.finish,
+                error: lastAssistant.error,
+                hasToolCalls,
+                userAskText: rootAsk,
+                continueCount: avoidanceContinues,
+                bashFailed,
+              })
+            ) {
+              yield* Effect.logInfo("manthan tool avoidance autocontinue", {
+                "session.id": sessionID,
+                attempt: avoidanceContinues + 1,
+                bashFailed,
+              })
+              const continueMsg = yield* sessions.updateMessage({
+                id: MessageID.ascending(),
+                role: "user",
+                sessionID,
+                time: { created: Date.now() },
+                agent: lastUser.agent,
+                model: lastUser.model,
+              })
+              yield* sessions.updatePart({
+                id: PartID.ascending(),
+                messageID: continueMsg.id,
+                sessionID,
+                type: "text",
+                metadata: { tool_avoidance_continue: true },
+                synthetic: true,
+                text: manthanToolAvoidanceContinueText({
+                  bashFailed,
+                  attempt: avoidanceContinues,
+                }),
+                time: { start: Date.now(), end: Date.now() },
+              })
+              continue
             }
             yield* Effect.logInfo("exiting loop", { "session.id": sessionID })
             break

@@ -34,6 +34,9 @@ import {
   manthanClientCompactAllowed,
   createManthanThinkContentGate,
   extractManthanThinkLeak,
+  buildManthanCompactJsonl,
+  formatManthanCompactStderrLine,
+  isManthanLaunchMode,
 } from "@/provider/manthan"
 import { NotFoundError } from "@/storage/storage"
 import {
@@ -618,6 +621,26 @@ const layer = Layer.effect(
                     text: MANTHAN_COMPACT_CONTINUE_TEXT,
                     time: { start: Date.now(), end: Date.now() },
                   })
+                }
+                const compactTelemetry = buildManthanCompactJsonl(manthan, {
+                  messageID: ctx.assistantMessage.id,
+                })
+                if (compactTelemetry && (manthanCompacted || manthan.compaction_status === "compacted")) {
+                  yield* session.updatePart({
+                    id: PartID.ascending(),
+                    messageID: ctx.assistantMessage.id,
+                    sessionID: ctx.sessionID,
+                    type: "text",
+                    synthetic: true,
+                    text: compactTelemetry.summary_preview || "Manthan server compacted context.",
+                    time: { start: Date.now(), end: Date.now() },
+                    metadata: { manthan_compact: true, ...compactTelemetry },
+                  })
+                  if (isManthanLaunchMode()) {
+                    yield* Effect.sync(() => {
+                      process.stderr.write(`${formatManthanCompactStderrLine(compactTelemetry)}\n`)
+                    })
+                  }
                 }
               }
             }
