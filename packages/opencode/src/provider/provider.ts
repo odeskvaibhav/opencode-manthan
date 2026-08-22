@@ -35,6 +35,7 @@ import {
   applyManthanModelPolicies,
   ensureManthanModelsFromCatalog,
   ensureManthanReasoningVariants,
+  ensureManthanInterleavedReasoning,
   fetchManthanModelCatalog,
   isManthanConfig,
   isManthanProviderID,
@@ -1641,14 +1642,18 @@ const layer = Layer.effect(
                 })
                 pruneManthanSidecarModels(provider.models)
                 pruneManthanModelsToLiveCatalog(provider.models, catalog)
+                ensureManthanInterleavedReasoning(provider.models)
                 ensureManthanReasoningVariants(provider.models)
               } else {
                 pruneManthanSidecarModels(provider.models)
+                ensureManthanInterleavedReasoning(provider.models)
                 ensureManthanReasoningVariants(provider.models)
               }
             } catch {
               // keep config catalog if /v1/models is unreachable
               pruneManthanSidecarModels(provider.models)
+              ensureManthanInterleavedReasoning(provider.models)
+              ensureManthanReasoningVariants(provider.models)
             }
           }
         })

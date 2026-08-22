@@ -8,6 +8,7 @@ import {
   ensureManthanClientHeaders,
   ensureManthanModelsFromCatalog,
   ensureManthanReasoningVariants,
+  ensureManthanInterleavedReasoning,
   createManthanThinkContentGate,
   extractManthanThinkLeak,
   gpuWakeLabel,
@@ -201,6 +202,28 @@ describe("manthan Option A", () => {
     ])
     expect(manthanReasoningVariants().medium).toMatchObject({
       reasoningEffort: "medium",
+    })
+  })
+
+  test("ensureManthanInterleavedReasoning sets reasoning_content field", () => {
+    const models: Record<string, any> = {
+      "laguna-s-2.1": {
+        id: "laguna-s-2.1",
+        limit: { context: 65536 },
+        capabilities: {
+          temperature: true,
+          reasoning: true,
+          attachment: false,
+          toolcall: true,
+          input: { text: true, audio: false, image: false, video: false, pdf: false },
+          output: { text: true, audio: false, image: false, video: false, pdf: false },
+          interleaved: false,
+        },
+      },
+    }
+    expect(ensureManthanInterleavedReasoning(models)).toBe(1)
+    expect(models["laguna-s-2.1"].capabilities.interleaved).toEqual({
+      field: "reasoning_content",
     })
   })
 

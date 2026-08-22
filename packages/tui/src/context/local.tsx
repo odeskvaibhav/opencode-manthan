@@ -1,6 +1,6 @@
 import { createStore, produce } from "solid-js/store"
 import { createSimpleContext } from "./helper"
-import { batch, createEffect, createMemo } from "solid-js"
+import { batch, createEffect, createMemo, createSignal } from "solid-js"
 import { useSync } from "./sync"
 import { useEvent } from "./event"
 import path from "path"
@@ -134,8 +134,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     }
 
     const agent = createAgent()
-    /** `"unset"` = follow agent config; otherwise in-session cycle/set. */
-    let variantSessionChoice: string | undefined | "unset" = "unset"
+    /** `"unset"` = follow agent/store; otherwise in-session cycle/set. Must be a
+     * signal or Ctrl+P / set() won't re-render the effort chip. */
+    const [variantSessionChoice, setVariantSessionChoice] = createSignal<
+      string | undefined | "unset"
+    >("unset")
 
     function createModel() {
       const [modelStore, setModelStore] = createStore<{
@@ -176,6 +179,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         }
         state.pending = false
         void writeJsonAtomic(filePath, {
+          model: modelStore.model,
           recent: modelStore.recent,
           favorite: modelStore.favorite,
           variant: modelStore.variant,
@@ -186,6 +190,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         .then((x) => {
           if (!x || typeof x !== "object") return
           const value = x as Record<string, unknown>
+          if (typeof value.model === "object" && value.model !== null && !Array.isArray(value.model)) {
+            setModelStore(
+              "model",
+              value.model as Record<string, { providerID: string; modelID: string }>,
+            )
+          }
           if (Array.isArray(value.recent)) setModelStore("recent", value.recent)
           if (Array.isArray(value.favorite)) setModelStore("favorite", value.favorite)
           if (typeof value.variant === "object" && value.variant !== null)
@@ -246,9 +256,15 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
       const currentModel = createMemo(() => {
         const a = agent.current()
+        if (a) {
+          const stored = modelStore.model[a.name]
+          if (stored) {
+            // Explicit user pick — keep even if live /v1/models dropped it (GPU offline).
+            if (isModelValid(stored) || isManthanProviderID(stored.providerID)) return stored
+          }
+        }
         return (
           getFirstValidModel(
-            () => a && modelStore.model[a.name],
             () => a && a.model,
             fallbackModel,
           ) ?? undefined
@@ -343,15 +359,15 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             setModelStore("model", a.name, model)
             if (options?.recent) {
               setModelStore("recent", recentModels(model, modelStore.recent))
-              save()
             }
+            save()
             if (isManthanProviderID(model.providerID)) {
               const p = sync.data.provider.find((item) => item.id === model.providerID)
               if (p) wakeManthanGpuFromProvider(p)
             }
           })
         },
-        /** Drop in-session agent model so Home can force the Manthan picker again. */
+        /** Drop in-session agent model (explicit reset only — not used on home/new session). */
         clear() {
           const a = agent.current()
           if (!a) return
@@ -361,6 +377,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               delete draft[a.name]
             }),
           )
+          save()
         },
         toggleFavorite(model: { providerID: string; modelID: string }) {
           batch(() => {
@@ -396,15 +413,18 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             const list = this.list()
             const inList = (v: string | undefined) =>
               !!v && v !== "default" && (list.length === 0 || list.includes(v))
-            // In-session cycle/set wins; otherwise agent config (medium), not disk `low`.
-            if (variantSessionChoice !== "unset") {
-              if (!variantSessionChoice || variantSessionChoice === "default") return undefined
-              if (inList(variantSessionChoice)) return variantSessionChoice
+            const session = variantSessionChoice()
+            // In-session cycle/set wins.
+            if (session !== "unset") {
+              if (!session || session === "default") return undefined
+              if (inList(session)) return session
             }
-            const agentVariant = agent.current()?.variant
-            if (inList(agentVariant)) return agentVariant
+            // Prefer last explicit per-model choice over agent.build.variant
+            // (config often pins "medium" and was swallowing Ctrl+P picks).
             const stored = this.selected()
             if (inList(stored)) return stored
+            const agentVariant = agent.current()?.variant
+            if (inList(agentVariant)) return agentVariant
             return undefined
           },
           list() {
@@ -415,14 +435,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             if (!info?.variants) return []
             return Object.keys(info.variants)
           },
-          /** New chat / home: drop in-session override so agent.variant applies. */
+          /** New chat / home: drop in-session override so agent/store apply. */
           useAgentDefault() {
-            variantSessionChoice = "unset"
+            setVariantSessionChoice("unset")
           },
           set(value: string | undefined) {
             const m = currentModel()
             if (!m) return
-            variantSessionChoice = value ?? undefined
+            setVariantSessionChoice(value ?? undefined)
             const key = `${m.providerID}/${m.modelID}`
             setModelStore("variant", key, value ?? "default")
             save()

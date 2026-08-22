@@ -6,6 +6,8 @@ import { useTuiStartup } from "./runtime"
 export type HomeRoute = {
   type: "home"
   prompt?: PromptInfo
+  /** Manthan: show model picker before the first message (new session). */
+  pickModel?: boolean
 }
 
 export type SessionRoute = {
@@ -27,7 +29,7 @@ export const { use: useRoute, provider: RouteProvider } = createSimpleContext({
   init: (props: { initialRoute?: Route }) => {
     const startup = useTuiStartup()
     const [store, setStore] = createStore<Route>(
-      props.initialRoute ?? initialRoute(startup.initialRoute) ?? { type: "home" },
+      props.initialRoute ?? initialRoute(startup.initialRoute) ?? { type: "home", pickModel: true },
     )
 
     return {

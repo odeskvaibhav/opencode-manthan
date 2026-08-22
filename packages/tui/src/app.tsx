@@ -593,6 +593,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           dialog.clear()
           route.navigate({
             type: "home",
+            pickModel: true,
           })
         },
       },
@@ -1011,7 +1012,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
 
   event.on("session.deleted", (evt) => {
     if (route.data.type === "session" && route.data.sessionID === evt.properties.info.id) {
-      route.navigate({ type: "home" })
+      local.model.clear()
+      route.navigate({ type: "home", pickModel: true })
       toast.show({
         variant: "info",
         message: "The current session was deleted",

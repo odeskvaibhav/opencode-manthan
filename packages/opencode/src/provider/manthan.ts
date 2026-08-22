@@ -373,6 +373,42 @@ export function ensureManthanReasoningVariants(
   return n
 }
 
+/**
+ * OpenCode only paints grey Thought when the model is marked interleaved on
+ * `reasoning_content`. Live catalog models and thin static stubs can miss it —
+ * CoT then lands in white answer text (VS Code TUI).
+ */
+export function ensureManthanInterleavedReasoning(
+  models: Record<string, ManthanModelPatch>,
+): number {
+  const field = { field: "reasoning_content" as const }
+  let n = 0
+  for (const [id, model] of Object.entries(models)) {
+    if (isManthanInternalSidecarModelId(id) || (model.id && isManthanInternalSidecarModelId(model.id))) {
+      continue
+    }
+    if (!modelWantsManthanEffortVariants(model) && model.capabilities?.reasoning !== true) {
+      continue
+    }
+    const caps = model.capabilities
+    const inter = caps?.interleaved
+    const hasField =
+      typeof inter === "object" && !!inter && inter.field === "reasoning_content"
+    if (caps?.reasoning === true && hasField) continue
+    model.capabilities = {
+      temperature: caps?.temperature ?? true,
+      reasoning: true,
+      attachment: caps?.attachment ?? false,
+      toolcall: caps?.toolcall ?? true,
+      input: caps?.input ?? { text: true, audio: false, image: false, video: false, pdf: false },
+      output: caps?.output ?? { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: field,
+    }
+    n++
+  }
+  return n
+}
+
 export type ManthanThinkEmit = { reasoning?: string; content?: string }
 
 /**

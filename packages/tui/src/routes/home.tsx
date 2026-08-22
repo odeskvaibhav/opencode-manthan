@@ -4,7 +4,7 @@ import { Logo } from "../component/logo"
 import { useSync } from "../context/sync"
 import { Toast } from "../ui/toast"
 import { useArgs } from "../context/args"
-import { useRouteData } from "../context/route"
+import { useRouteData, useRoute } from "../context/route"
 import { usePromptRef } from "../context/prompt"
 import { useLocal } from "../context/local"
 import { usePluginRuntime } from "../plugin/runtime"
@@ -36,6 +36,7 @@ function HomeInner() {
   const pluginRuntime = usePluginRuntime()
   const sync = useSync()
   const route = useRouteData("home")
+  const routeNav = useRoute()
   const promptRef = usePromptRef()
   const [ref, setRef] = createSignal<PromptRef | undefined>()
   const args = useArgs()
@@ -52,7 +53,6 @@ function HomeInner() {
     return configured ?? 75
   })
   let sent = false
-  let modelPickerOpened = false
 
   onMount(() => {
     editor.clearSelection()
@@ -84,20 +84,17 @@ function HomeInner() {
     r.submit()
   })
 
-  // Manthan: always open the model picker once on fresh home (Cmd+Esc / session.new).
-  // Never skip because Laguna is already in recent / provider_default / residual
-  // agent model — clear first, then DialogModel. Live /v1/models must be non-empty
-  // (findManthanProvider). Skip only for explicit CLI --model / --prompt.
+  // Manthan new session: model picker when home.pickModel (session.new / cold start).
+  // Mid-session GPU/API blips never clear the pick — only session.new does.
   createEffect(() => {
-    if (modelPickerOpened) return
+    if (!route.pickModel) return
     if (!sync.ready || !local.model.ready) return
     if (args.prompt || args.model) return
     if (!isManthanLaunchMode() && !hasManthanProvider(sync.data.provider)) return
     const manthan = findManthanProvider(sync.data.provider)
     if (!manthan || Object.keys(manthan.models).length === 0) return
-    modelPickerOpened = true
-    local.model.clear()
     const providerID = manthan.id
+    routeNav.navigate({ type: "home", prompt: route.prompt, pickModel: false })
     queueMicrotask(() => {
       dialog.replace(() => <DialogModel providerID={providerID} />)
     })
