@@ -582,7 +582,7 @@ const layer = Layer.effect(
                 })
                 manthanCompacted = added
                 if (manthanCompacted) {
-                  yield* pruneManthanLocalToolOutputs({
+                  yield* pruneManthanLocalToolOutputs(session, {
                     sessionID: ctx.sessionID,
                     mode: "post_compact",
                     compactMessageID: ctx.assistantMessage.id,
@@ -647,8 +647,8 @@ const layer = Layer.effect(
                   if (isManthanLaunchMode()) {
                     yield* Effect.sync(() => {
                       try {
-                        if (typeof process !== "undefined") {
-                          process.stderr?.write?.(
+                        if (typeof globalThis.process !== "undefined") {
+                          globalThis.process.stderr?.write?.(
                             `${formatManthanCompactStderrLine(compactTelemetry)}\n`,
                           )
                         }
@@ -866,7 +866,7 @@ const layer = Layer.effect(
         if (SessionV1.ContextOverflowError.isInstance(error)) {
           if (isManthanProviderID(ctx.assistantMessage.providerID) && !manthanClientCompactAllowed()) {
             // Shrink local history before retry — otherwise 413 loops with the same fat body.
-            yield* pruneManthanLocalToolOutputs({
+            yield* pruneManthanLocalToolOutputs(session, {
               sessionID: ctx.sessionID,
               mode: "overflow",
             }).pipe(Effect.ignore)

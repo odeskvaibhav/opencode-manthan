@@ -1487,7 +1487,7 @@ const layer = Layer.effect(
             if (result === "compact") {
               if (isManthanProviderID(lastUser.model.providerID) && !manthanClientCompactAllowed()) {
                 // Server owns condense — queue header + synthetic continue, no UI compact row.
-                yield* pruneManthanLocalToolOutputs({
+                yield* pruneManthanLocalToolOutputs(sessions, {
                   sessionID,
                   mode: "overflow",
                   compactMessageID: handle.message.id,

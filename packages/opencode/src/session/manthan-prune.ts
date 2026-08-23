@@ -8,7 +8,7 @@
  */
 import { Effect } from "effect"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { Session } from "./session"
+import { Session, type Interface as SessionInterface } from "./session"
 import type { SessionID } from "./schema"
 import { NotFoundError } from "@/storage/storage"
 
@@ -32,7 +32,9 @@ function keepRecentCount(mode: ManthanPruneMode): number {
   return mode === "overflow" ? MANTHAN_KEEP_RECENT_ON_OVERFLOW : MANTHAN_KEEP_RECENT_AFTER_COMPACT
 }
 
-function isCompletedToolPart(part: SessionV1.Part): part is SessionV1.ToolPart {
+function isCompletedToolPart(
+  part: SessionV1.Part,
+): part is SessionV1.ToolPart & { state: SessionV1.ToolStateCompleted } {
   return part.type === "tool" && part.state.status === "completed"
 }
 
@@ -76,11 +78,13 @@ export function selectManthanToolPartsToCompact(
   return toCompact
 }
 
-export function pruneManthanLocalToolOutputs(input: {
-  sessionID: SessionID
-} & ManthanPruneOpts): Effect.Effect<number, never, Session.Service> {
+export function pruneManthanLocalToolOutputs(
+  session: SessionInterface,
+  input: {
+    sessionID: SessionID
+  } & ManthanPruneOpts,
+): Effect.Effect<number> {
   return Effect.gen(function* () {
-    const session = yield* Session.Service
     const msgs = yield* session
       .messages({ sessionID: input.sessionID })
       .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)))

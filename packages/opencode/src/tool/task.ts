@@ -175,7 +175,7 @@ function renderOutput(input: {
   return formatTaskToolOutput(input)
 }
 
-export const TaskTool = Tool.define(
+export const TaskTool = Tool.define<typeof Parameters, TaskMetadata>(
   id,
   Effect.gen(function* () {
     const agent = yield* Agent.Service

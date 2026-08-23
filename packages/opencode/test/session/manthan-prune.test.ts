@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@opencode-ai/core/provider"
 import { MessageID, PartID } from "@/session/schema"
 import {
   MANTHAN_KEEP_RECENT_AFTER_COMPACT,
@@ -37,8 +39,8 @@ function assistant(id: string, parts: SessionV1.Part[]): SessionV1.WithParts {
       path: { cwd: "/", root: "/" },
       cost: 0,
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-      modelID: "m",
-      providerID: "manthan",
+      modelID: ModelV2.ID.make("m"),
+      providerID: ProviderV2.ID.make("manthan"),
       parentID: "msg_u1" as MessageID,
       time: { created: 0 },
       finish: "stop",
