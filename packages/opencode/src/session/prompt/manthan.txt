@@ -31,7 +31,8 @@ For engineering work: search the codebase to understand context, implement with 
 Tool results and user messages may include <system-reminder> tags. Those are reminders, not user content.
 
 # Tool usage policy
-Prefer the Task tool for broad file search to save context. Batch independent tool calls in one response (including parallel bash when needed).
+Prefer the Task tool for broad file search to save context. Batch independent read/grep/bash in one response when needed.
+Never launch multiple Task tools in parallel — Manthan has one inference worker; parallel subagents wedge. Call task at most once, wait for it, then continue.
 
 Before editing, infer intent from filenames and directory structure.
 

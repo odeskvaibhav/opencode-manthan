@@ -237,7 +237,16 @@ export function toolLoopKey(tool: string, input: unknown): string {
       .replace(/\s+/g, " ")
       .trim()
       .toLowerCase()
-    return `read\0${path}`
+    // Offset/limit are part of the call identity — paging a large file is progress,
+    // not a doom loop. Identical path+window rematches still collide.
+    const offset = Number(record.offset ?? record.start_line ?? record.startLine ?? 1)
+    const limitRaw = record.limit ?? record.end_line ?? record.endLine
+    const limit =
+      limitRaw === undefined || limitRaw === null || limitRaw === ""
+        ? "default"
+        : String(Number(limitRaw) || limitRaw)
+    const off = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 1
+    return `read\0${path}\0${off}\0${limit}`
   }
 
   return `${name}\0${argsJson}`

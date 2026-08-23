@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeEach } from "bun:test"
 import {
   TOOL_LOOP_PIVOT_THRESHOLD,
+  TOOL_LOOP_REFUSE_THRESHOLD,
   ToolLoopAbortError,
   buildToolLoopPivotSteerText,
   clearToolLoopPivot,
@@ -104,5 +105,31 @@ describe("tool loop detection", () => {
     expect(text).toContain("[tool_loop_pivot]")
     expect(text).toContain("no tools")
     expect(peekToolLoopPivot("s1")).toBeUndefined()
+  })
+
+  test("read paging different offsets are distinct keys (not a doom loop)", () => {
+    const path = "src/contexts/auth-context.tsx"
+    const history = Array.from({ length: TOOL_LOOP_PIVOT_THRESHOLD + 3 }, (_, i) => ({
+      tool: "read",
+      input: { filePath: path, offset: 1 + i * 200, limit: 200 },
+      output: `chunk ${i}`,
+      status: "completed" as const,
+    }))
+    const next = { tool: "read", input: { filePath: path, offset: 1 + history.length * 200, limit: 200 } }
+    expect(toolLoopKey("read", history[0]!.input)).not.toBe(toolLoopKey("read", next.input))
+    expect(evaluateToolLoop(history, next).refuse).toBe(false)
+  })
+
+  test("identical read path+offset rematch still refuses", () => {
+    const args = { filePath: "src/contexts/auth-context.tsx", offset: 900, limit: 312 }
+    const history = Array.from({ length: TOOL_LOOP_REFUSE_THRESHOLD - 1 }, () => ({
+      tool: "read",
+      input: args,
+      output: "same window",
+      status: "completed" as const,
+    }))
+    const d = evaluateToolLoop(history, { tool: "read", input: args })
+    expect(d.refuse).toBe(true)
+    expect(d.reason).toBe("streak")
   })
 })

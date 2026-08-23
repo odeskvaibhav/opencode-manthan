@@ -56,6 +56,98 @@
         }
       },
       "models": {
+        "qwen3.5-122b-a10b": {
+          "name": "Qwen3.5 122B A10B (G4 / SGLang NVFP4)",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 131072,
+            "output": 8192
+          },
+          "options": {
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "reasoningEffort": "low"
+          },
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoning_effort": "none",
+              "body": {
+                "reasoning_effort": "none"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "none"
+              },
+              "options": {
+                "reasoningEffort": "none",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "none"
+                }
+              }
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoning_effort": "low",
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "low"
+              },
+              "options": {
+                "reasoningEffort": "low",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "low"
+                }
+              }
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoning_effort": "medium",
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "medium"
+              },
+              "options": {
+                "reasoningEffort": "medium",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "medium"
+                }
+              }
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoning_effort": "high",
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "headers": {
+                "X-Manthan-Reasoning-Effort": "high"
+              },
+              "options": {
+                "reasoningEffort": "high",
+                "headers": {
+                  "X-Manthan-Reasoning-Effort": "high"
+                }
+              }
+            }
+          }
+        },
         "qwen3.6-27b-sharded": {
           "name": "Qwen3.6 27B (sharded)",
           "reasoning": true,

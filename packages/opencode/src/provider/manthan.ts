@@ -1440,6 +1440,7 @@ export type ManthanContextUsage = {
   compact_usage_before_percent?: number | null
   compact_usage_before_tokens?: number | null
   sidecar_route?: string | null
+  compact_route?: string | null
 }
 
 const pendingBySession = new Map<string, ManthanContextUsage>()
@@ -1511,6 +1512,7 @@ export function parseManthanContextHeaders(
     ),
     compact_usage_before_tokens: numHeader(headers, "x-manthan-compact-usage-before-tokens"),
     sidecar_route: headerGet(headers, "x-manthan-sidecar-route") ?? null,
+    compact_route: headerGet(headers, "x-manthan-compact-route") ?? null,
   }
 }
 
@@ -1528,6 +1530,7 @@ export type ManthanCompactJsonl = {
   context_used_before_tokens: number | null
   usage_before_percent: number | null
   sidecar_route: string | null
+  compact_route: string | null
   summary_preview: string | null
   message_id?: string
 }
@@ -1545,6 +1548,7 @@ export function buildManthanCompactJsonl(
     context_used_before_tokens: usage.compact_usage_before_tokens ?? null,
     usage_before_percent: usage.compact_usage_before_percent ?? null,
     sidecar_route: usage.sidecar_route ?? null,
+    compact_route: usage.compact_route ?? null,
     summary_preview: summary ? summary.slice(0, 800) : null,
     ...(opts?.messageID ? { message_id: opts.messageID } : {}),
   }

@@ -32,3 +32,7 @@ UPCOMING_CHANGELOG.md
 logs/
 *.bun-build
 tsconfig.tsbuildinfo
+
+# Private friend onboarding (contains API keys — share manually, do not commit)
+FRIEND-SETUP.md
+share/

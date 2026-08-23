@@ -31,7 +31,9 @@ The install script sets `manthan.binary` to `scripts/opencode-manthan.sh` (fork 
 
 ## Setup
 
-Friend laptop (clone → config → extension): **[INSTALL.md](../../INSTALL.md)**.
+Friend laptop (clone → config → extension): **[FRIEND-SETUP.md](FRIEND-SETUP.md)** (Vaibhav’s API key + `share/opencode.jsonc` — **private, gitignored**).
+
+Legacy generic steps (no secrets): below.
 
 1. Copy example config: `./scripts/install-opencode-config.sh`  
    → `~/.config/opencode/opencode.jsonc` (source of truth). Set `MANTHAN_API_KEY`.

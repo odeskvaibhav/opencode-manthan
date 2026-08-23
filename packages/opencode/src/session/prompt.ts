@@ -10,6 +10,7 @@ import { Session } from "./session"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
 import { isManthanProviderID, manthanClientCompactAllowed, MANTHAN_COMPACT_CONTINUE_TEXT, requestManthanCompact, shouldManthanToolAvoidanceAutocontinue, manthanToolAvoidanceContinueText, rootUserAskFromMessages, countManthanToolAvoidanceContinues, sessionLastBashFailed } from "@/provider/manthan"
+import { pruneManthanLocalToolOutputs } from "./manthan-prune"
 import {
   buildToolLoopPivotSteerText,
   peekToolLoopPivot,
@@ -1486,6 +1487,11 @@ const layer = Layer.effect(
             if (result === "compact") {
               if (isManthanProviderID(lastUser.model.providerID) && !manthanClientCompactAllowed()) {
                 // Server owns condense — queue header + synthetic continue, no UI compact row.
+                yield* pruneManthanLocalToolOutputs({
+                  sessionID,
+                  mode: "overflow",
+                  compactMessageID: handle.message.id,
+                }).pipe(Effect.ignore)
                 requestManthanCompact(sessionID)
                 const continueMsg = yield* sessions.updateMessage({
                   id: MessageID.ascending(),

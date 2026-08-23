@@ -1,4 +1,4 @@
-import { afterEach, describe, expect } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -16,7 +16,16 @@ import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
 
-import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
+import {
+  TaskTool,
+  type TaskPromptOps,
+  findRecentDuplicateCompletedTask,
+  formatTaskToolOutput,
+  tryAcquireManthanTaskSlot,
+  releaseManthanTaskSlot,
+  resetManthanTaskSlot,
+  manthanTaskInflightCount,
+} from "../../src/tool/task"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -987,4 +996,100 @@ describe("tool.task", () => {
       expect((yield* jobs.get(grandchild.id))?.status).toBe("cancelled")
     }),
   )
+})
+
+describe("task duplicate guard", () => {
+  test("findRecentDuplicateCompletedTask matches same description+prompt", () => {
+    const hit = findRecentDuplicateCompletedTask({
+      description: "Search kanban components for patterns",
+      prompt: "Search for useState under kanban/",
+      messages: [
+        {
+          parts: [
+            {
+              type: "tool",
+              tool: "task",
+              state: {
+                status: "completed",
+                input: {
+                  description: "Search kanban components for patterns",
+                  prompt: "Search for useState under kanban/",
+                },
+                output: "<task id=\"ses_x\" state=\"completed\">\n<task_result>\nok\n</task_result>\n</task>",
+              },
+            },
+          ],
+        },
+      ],
+    })
+    expect(hit?.output).toContain("task_result")
+  })
+
+  test("findRecentDuplicateCompletedTask ignores different prompt", () => {
+    const hit = findRecentDuplicateCompletedTask({
+      description: "Search kanban",
+      prompt: "new different work",
+      messages: [
+        {
+          parts: [
+            {
+              type: "tool",
+              tool: "task",
+              state: {
+                status: "completed",
+                input: { description: "Search kanban", prompt: "old work" },
+                output: "prior",
+              },
+            },
+          ],
+        },
+      ],
+    })
+    expect(hit).toBeUndefined()
+  })
+
+  test("formatTaskToolOutput appends stop instruction on completed", () => {
+    const out = formatTaskToolOutput({
+      sessionID: SessionID.make("ses_test"),
+      state: "completed",
+      text: "bullets here",
+    })
+    expect(out).toContain("bullets here")
+    expect(out).toMatch(/Do NOT call the task tool again/i)
+  })
+})
+
+describe("manthan parallel task slot", () => {
+  test("allows one acquire and blocks the second while mode is on", () => {
+    const prev = process.env.OPENCODE_MANTHAN_MODE
+    process.env.OPENCODE_MANTHAN_MODE = "1"
+    resetManthanTaskSlot()
+    try {
+      expect(tryAcquireManthanTaskSlot()).toBe(true)
+      expect(manthanTaskInflightCount()).toBe(1)
+      expect(tryAcquireManthanTaskSlot()).toBe(false)
+      releaseManthanTaskSlot()
+      expect(manthanTaskInflightCount()).toBe(0)
+      expect(tryAcquireManthanTaskSlot()).toBe(true)
+    } finally {
+      resetManthanTaskSlot()
+      if (prev === undefined) delete process.env.OPENCODE_MANTHAN_MODE
+      else process.env.OPENCODE_MANTHAN_MODE = prev
+    }
+  })
+
+  test("no-ops when Manthan mode is off", () => {
+    const prev = process.env.OPENCODE_MANTHAN_MODE
+    delete process.env.OPENCODE_MANTHAN_MODE
+    resetManthanTaskSlot()
+    try {
+      expect(tryAcquireManthanTaskSlot()).toBe(true)
+      expect(tryAcquireManthanTaskSlot()).toBe(true)
+      expect(manthanTaskInflightCount()).toBe(0)
+    } finally {
+      resetManthanTaskSlot()
+      if (prev === undefined) delete process.env.OPENCODE_MANTHAN_MODE
+      else process.env.OPENCODE_MANTHAN_MODE = prev
+    }
+  })
 })

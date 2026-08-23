@@ -751,6 +751,80 @@ describe("session.message-v2.toModelMessage", () => {
     ])
   })
 
+  test("drops manthan_compact synthetic text after tool parts", async () => {
+    const userID = "m-user"
+    const assistantID = "m-assistant"
+
+    const input: SessionV1.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [
+          {
+            ...basePart(userID, "u1"),
+            type: "text",
+            text: "read files",
+          },
+        ] as SessionV1.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          {
+            ...basePart(assistantID, "a1"),
+            type: "tool",
+            callID: "call-read",
+            tool: "read",
+            state: {
+              status: "completed",
+              input: { filePath: "a.ts" },
+              output: "file body",
+              title: "Read",
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
+          },
+          {
+            ...basePart(assistantID, "a2"),
+            type: "text",
+            text: "Keep: current task; files read: a.ts",
+            synthetic: true,
+            metadata: { manthan_compact: true, status: "compacted" },
+          },
+        ] as SessionV1.Part[],
+      },
+    ]
+
+    expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "read files" }],
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-read",
+            toolName: "read",
+            input: { filePath: "a.ts" },
+            providerExecuted: undefined,
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-read",
+            toolName: "read",
+            output: { type: "text", value: "file body" },
+          },
+        ],
+      },
+    ])
+  })
+
   test("truncates tool output when requested", async () => {
     const userID = "m-user"
     const assistantID = "m-assistant"

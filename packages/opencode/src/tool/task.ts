@@ -14,6 +14,7 @@ import { Effect, Exit, Schema, Scope } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@opencode-ai/core/database/database"
+import { isManthanLaunchMode } from "../provider/manthan"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -61,6 +62,91 @@ export const Parameters = Schema.Struct({
   }),
 })
 
+/**
+ * Manthan is typically one GPU worker. Parallel `task` tool calls fight for that
+ * slot and look wedged (trivial bash/read stuck for minutes). Cap to one in-flight
+ * subagent while OPENCODE_MANTHAN_MODE is on (VS Code + soak).
+ */
+let manthanTaskInflight = 0
+
+/** @internal test helper */
+export function manthanTaskInflightCount() {
+  return manthanTaskInflight
+}
+
+/** @internal test helper */
+export function resetManthanTaskSlot() {
+  manthanTaskInflight = 0
+}
+
+export function tryAcquireManthanTaskSlot(): boolean {
+  if (!isManthanLaunchMode()) return true
+  if (manthanTaskInflight >= 1) return false
+  manthanTaskInflight += 1
+  return true
+}
+
+export function releaseManthanTaskSlot(): void {
+  if (!isManthanLaunchMode()) return
+  if (manthanTaskInflight > 0) manthanTaskInflight -= 1
+}
+
+const MANTHAN_PARALLEL_TASK_BLOCKED = [
+  "ERROR: Another subagent is already running.",
+  "Manthan has one inference worker — do NOT launch parallel task tools.",
+  "Wait for the current task to finish (or work with read/grep/bash yourself), then call task at most once.",
+].join(" ")
+
+/** Normalize task description+prompt so repeat calls collide. */
+export function taskWorkKey(description: string, prompt: string): string {
+  return `${description}\n${prompt}`
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 400)
+}
+
+/**
+ * If the parent already got a completed task with the same work, reuse it.
+ * Stops Qwen/etc. from spawning endless identical helpers.
+ */
+export function findRecentDuplicateCompletedTask(input: {
+  description: string
+  prompt: string
+  messages: Array<{
+    parts: Array<{
+      type: string
+      tool?: string
+      state?: {
+        status?: string
+        input?: Record<string, unknown>
+        output?: string
+      }
+    }>
+  }>
+}): { output: string; sessionId?: string } | undefined {
+  const want = taskWorkKey(input.description, input.prompt)
+  if (want.length < 12) return undefined
+  for (let mi = input.messages.length - 1; mi >= 0; mi--) {
+    const parts = input.messages[mi]?.parts ?? []
+    for (let pi = parts.length - 1; pi >= 0; pi--) {
+      const part = parts[pi]!
+      if (part.type !== "tool" || part.tool !== "task") continue
+      const st = part.state
+      if (st?.status !== "completed" || !st.output) continue
+      const prevDesc = String(st.input?.description ?? "")
+      const prevPrompt = String(st.input?.prompt ?? "")
+      if (taskWorkKey(prevDesc, prevPrompt) !== want) continue
+      return { output: st.output, sessionId: String(st.input?.task_id ?? "") || undefined }
+    }
+  }
+  return undefined
+}
+
+const TASK_COMPLETED_STOP =
+  "\n\nIMPORTANT: This task finished successfully. Relay the <task_result> to the user now in a text reply and STOP. " +
+  "Do NOT call the task tool again for the same work."
+
 export function formatTaskToolOutput(input: {
   sessionID: SessionID
   state: "running" | "completed" | "error"
@@ -68,7 +154,7 @@ export function formatTaskToolOutput(input: {
   text: string
 }) {
   const tag = input.state === "error" ? "task_error" : "task_result"
-  return [
+  const body = [
     `<task id="${input.sessionID}" state="${input.state}">`,
     ...(input.summary ? [`<summary>${input.summary}</summary>`] : []),
     `<${tag}>`,
@@ -76,6 +162,8 @@ export function formatTaskToolOutput(input: {
     `</${tag}>`,
     "</task>",
   ].join("\n")
+  if (input.state === "completed") return body + TASK_COMPLETED_STOP
+  return body
 }
 
 function renderOutput(input: {
@@ -137,8 +225,52 @@ export const TaskTool = Tool.define(
         })
       }
 
+      // Same work already finished in this parent session → reuse, do not spawn again.
+      // (Resume via task_id is still allowed.)
+      if (!params.task_id) {
+        const recent = yield* sessions.messages({ sessionID: ctx.sessionID, limit: 40 }).pipe(Effect.orDie)
+        const dup = findRecentDuplicateCompletedTask({
+          description: params.description,
+          prompt: params.prompt,
+          messages: recent,
+        })
+        if (dup?.output) {
+          return {
+            title: params.description,
+            metadata: {
+              parentSessionId: ctx.sessionID,
+              duplicateTaskBlocked: true,
+            },
+            output:
+              dup.output +
+              "\n\nNOTE: Identical task already completed above. Use that result — do not spawn another helper.",
+          }
+        }
+      }
+
+      // Single-worker Manthan: refuse *new* parallel task spawns (sync before any yield).
+      // Resume via task_id does not take another slot.
+      const manthanNewTask = !params.task_id
+      if (manthanNewTask && !tryAcquireManthanTaskSlot()) {
+        return {
+          title: params.description,
+          metadata: {
+            parentSessionId: ctx.sessionID,
+            parallelTaskBlocked: true,
+          },
+          output: MANTHAN_PARALLEL_TASK_BLOCKED,
+        }
+      }
+      let manthanSlotHeld = manthanNewTask && isManthanLaunchMode()
+      const releaseManthanSlotIfHeld = () => {
+        if (!manthanSlotHeld) return
+        manthanSlotHeld = false
+        releaseManthanTaskSlot()
+      }
+
       const next = yield* agent.get(params.subagent_type)
       if (!next) {
+        releaseManthanSlotIfHeld()
         return yield* Effect.fail(new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`))
       }
 
@@ -184,7 +316,10 @@ export const TaskTool = Tool.define(
         Effect.provideService(Database.Service, database),
         Effect.orDie,
       )
-      if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
+      if (msg.info.role !== "assistant") {
+        releaseManthanSlotIfHeld()
+        return yield* Effect.fail(new Error("Not an assistant message"))
+      }
       const variant = msg.info.variant
 
       const model = next.model ?? {
@@ -204,7 +339,10 @@ export const TaskTool = Tool.define(
       })
 
       const ops = ctx.extra?.promptOps as TaskPromptOps
-      if (!ops) return yield* Effect.fail(new Error("TaskTool requires promptOps in ctx.extra"))
+      if (!ops) {
+        releaseManthanSlotIfHeld()
+        return yield* Effect.fail(new Error("TaskTool requires promptOps in ctx.extra"))
+      }
 
       const runTask = Effect.fn("TaskTool.runTask")(function* () {
         const parts = yield* ops.resolvePromptParts(params.prompt)
@@ -277,7 +415,13 @@ export const TaskTool = Tool.define(
         )
       })
 
-      if (yield* background.extend({ id: nextSession.id, run: runTask() })) {
+      const runWithSlot = () =>
+        runTask().pipe(
+          Effect.ensuring(Effect.sync(releaseManthanSlotIfHeld)),
+          Effect.onInterrupt(() => ops.cancel(nextSession.id)),
+        )
+
+      if (yield* background.extend({ id: nextSession.id, run: runWithSlot() })) {
         return {
           title: params.description,
           metadata: {
@@ -306,7 +450,7 @@ export const TaskTool = Tool.define(
           }),
           notify(nextSession.id),
         ]),
-        run: runTask().pipe(Effect.onInterrupt(() => ops.cancel(nextSession.id))),
+        run: runWithSlot(),
       })
 
       function backgroundResult() {

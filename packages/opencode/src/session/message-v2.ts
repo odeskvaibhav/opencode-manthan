@@ -276,6 +276,10 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
       })
       for (const part of msg.parts) {
         if (part.type === "text") {
+          // Manthan compact telemetry is UI/JSONL only — not for LLM replay.
+          // Appended after tool parts on the same assistant turn it breaks
+          // convertToModelMessages (text after tool-call blocks is invalid).
+          if (part.metadata?.manthan_compact === true) continue
           const text = part.text === "" && hasSignedReasoning ? " " : part.text
           assistantMessage.parts.push({
             type: "text",

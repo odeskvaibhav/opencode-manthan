@@ -181,7 +181,7 @@ const layer = Layer.effect(
           },
           general: {
             name: "general",
-            description: `General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.`,
+            description: `General-purpose agent for researching complex questions and executing multi-step tasks. Prefer one general task at a time (do not spawn several in parallel on a single-model backend).`,
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({

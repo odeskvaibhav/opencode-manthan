@@ -48,6 +48,7 @@ import {
   toolLoopKey,
   ToolLoopAbortError,
 } from "./loop-detection"
+import { pruneManthanLocalToolOutputs } from "./manthan-prune"
 
 export type Result = "compact" | "stop" | "continue" | "pivot"
 
@@ -580,6 +581,13 @@ const layer = Layer.effect(
                   compactReason: manthan.compact_reason,
                 })
                 manthanCompacted = added
+                if (manthanCompacted) {
+                  yield* pruneManthanLocalToolOutputs({
+                    sessionID: ctx.sessionID,
+                    mode: "post_compact",
+                    compactMessageID: ctx.assistantMessage.id,
+                  }).pipe(Effect.ignore)
+                }
                 // Markers only — never enqueue type:compaction. That part becomes a
                 // prompt-loop task and runs OpenCode's Objective LLM summarizer,
                 // which paints a second "Subagent context summarised" right after
@@ -638,7 +646,15 @@ const layer = Layer.effect(
                   })
                   if (isManthanLaunchMode()) {
                     yield* Effect.sync(() => {
-                      process.stderr.write(`${formatManthanCompactStderrLine(compactTelemetry)}\n`)
+                      try {
+                        if (typeof process !== "undefined") {
+                          process.stderr?.write?.(
+                            `${formatManthanCompactStderrLine(compactTelemetry)}\n`,
+                          )
+                        }
+                      } catch {
+                        /* --format json / no stderr */
+                      }
                     })
                   }
                 }
@@ -849,6 +865,11 @@ const layer = Layer.effect(
         const error = parse(e)
         if (SessionV1.ContextOverflowError.isInstance(error)) {
           if (isManthanProviderID(ctx.assistantMessage.providerID) && !manthanClientCompactAllowed()) {
+            // Shrink local history before retry — otherwise 413 loops with the same fat body.
+            yield* pruneManthanLocalToolOutputs({
+              sessionID: ctx.sessionID,
+              mode: "overflow",
+            }).pipe(Effect.ignore)
             // Option A: do not surface overflow as a hard error or enqueue OpenCode
             // compaction UI — next turn sends x-manthan-compact for the API.
             requestManthanCompact(ctx.sessionID)
