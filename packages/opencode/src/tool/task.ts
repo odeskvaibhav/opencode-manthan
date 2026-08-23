@@ -97,6 +97,19 @@ const MANTHAN_PARALLEL_TASK_BLOCKED = [
   "Wait for the current task to finish (or work with read/grep/bash yourself), then call task at most once.",
 ].join(" ")
 
+type TaskMetadata = {
+  parentSessionId: SessionID
+  sessionId?: SessionID
+  duplicateTaskBlocked?: boolean
+  parallelTaskBlocked?: boolean
+  background?: boolean
+  jobId?: SessionID
+  model?: {
+    modelID: SessionV1.Assistant["modelID"]
+    providerID: SessionV1.Assistant["providerID"]
+  }
+}
+
 /** Normalize task description+prompt so repeat calls collide. */
 export function taskWorkKey(description: string, prompt: string): string {
   return `${description}\n${prompt}`
@@ -175,7 +188,17 @@ function renderOutput(input: {
   return formatTaskToolOutput(input)
 }
 
-export const TaskTool = Tool.define<typeof Parameters, TaskMetadata>(
+export const TaskTool = Tool.define<
+  typeof Parameters,
+  TaskMetadata,
+  | Agent.Service
+  | BackgroundJob.Service
+  | Config.Service
+  | Session.Service
+  | Scope.Scope
+  | RuntimeFlags.Service
+  | Database.Service
+>(
   id,
   Effect.gen(function* () {
     const agent = yield* Agent.Service
@@ -240,7 +263,7 @@ export const TaskTool = Tool.define<typeof Parameters, TaskMetadata>(
             metadata: {
               parentSessionId: ctx.sessionID,
               duplicateTaskBlocked: true,
-            },
+            } satisfies TaskMetadata,
             output:
               dup.output +
               "\n\nNOTE: Identical task already completed above. Use that result — do not spawn another helper.",
@@ -257,7 +280,7 @@ export const TaskTool = Tool.define<typeof Parameters, TaskMetadata>(
           metadata: {
             parentSessionId: ctx.sessionID,
             parallelTaskBlocked: true,
-          },
+          } satisfies TaskMetadata,
           output: MANTHAN_PARALLEL_TASK_BLOCKED,
         }
       }
@@ -521,8 +544,8 @@ export const TaskTool = Tool.define<typeof Parameters, TaskMetadata>(
         : DESCRIPTION,
       parameters: Parameters,
       jsonSchema: flags.experimentalBackgroundSubagents ? undefined : ToolJsonSchema.fromSchema(BaseParameters),
-      execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
-        run(params, ctx).pipe(Effect.orDie),
-    }
+      execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context<TaskMetadata>) =>
+        run(params, ctx).pipe(Effect.orDie) as Effect.Effect<Tool.ExecuteResult<TaskMetadata>>,
+    } satisfies Tool.DefWithoutID<typeof Parameters, TaskMetadata>
   }),
 )

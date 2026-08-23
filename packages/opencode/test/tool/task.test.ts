@@ -257,7 +257,7 @@ describe("tool.task", () => {
       const kids = yield* sessions.children(chat.id)
       expect(kids).toHaveLength(1)
       expect(kids[0]?.id).toBe(child.id)
-      expect(result.metadata.sessionId).toBe(child.id)
+      expect(result.metadata.sessionId!).toBe(child.id)
       expect(result.output).toContain(`<task id="${child.id}" state="completed">`)
       expect(seen?.sessionID).toBe(child.id)
       expect(seen?.variant).toBe("xhigh")
@@ -390,10 +390,10 @@ describe("tool.task", () => {
 
       const kids = yield* sessions.children(chat.id)
       expect(kids).toHaveLength(1)
-      expect(kids[0]?.id).toBe(result.metadata.sessionId)
-      expect(result.metadata.sessionId).not.toBe("ses_missing")
-      expect(result.output).toContain(`<task id="${result.metadata.sessionId}" state="completed">`)
-      expect(seen?.sessionID).toBe(result.metadata.sessionId)
+      expect(kids[0]?.id).toBe(result.metadata.sessionId!)
+      expect(result.metadata.sessionId!).not.toBe("ses_missing")
+      expect(result.output).toContain(`<task id="${result.metadata.sessionId!}" state="completed">`)
+      expect(seen?.sessionID).toBe(result.metadata.sessionId!)
     }),
   )
 
@@ -472,7 +472,7 @@ describe("tool.task", () => {
           },
         )
 
-        expect((yield* sessions.get(result.metadata.sessionId)).parentID).toBe(child.id)
+        expect((yield* sessions.get(result.metadata.sessionId!)).parentID).toBe(child.id)
       }),
     { config: { subagent_depth: 2 } },
   )
@@ -506,7 +506,7 @@ describe("tool.task", () => {
           },
         )
 
-        const child = yield* sessions.get(result.metadata.sessionId)
+        const child = yield* sessions.get(result.metadata.sessionId!)
         expect(child.parentID).toBe(chat.id)
         expect(child.agent).toBe("reviewer")
         expect(child.permission).toEqual([
@@ -632,11 +632,11 @@ describe("tool.task", () => {
       const result = yield* Fiber.join(fiber)
       expect(result.metadata.background).toBe(true)
       expect(result.output).toContain(`state="running"`)
-      expect((yield* jobs.get(result.metadata.sessionId))?.status).toBe("running")
+      expect((yield* jobs.get(result.metadata.sessionId!))?.status).toBe("running")
       expect(runs).toBe(1)
 
       yield* Deferred.succeed(done, undefined)
-      expect((yield* jobs.wait({ id: result.metadata.sessionId })).info?.output).toBe("background done")
+      expect((yield* jobs.wait({ id: result.metadata.sessionId! })).info?.output).toBe("background done")
       expect((yield* Deferred.await(injected)).parts[0]?.type).toBe("text")
       expect(runs).toBe(1)
     }),
@@ -673,7 +673,7 @@ describe("tool.task", () => {
         },
       )
 
-      const job = yield* jobs.get(result.metadata.sessionId)
+      const job = yield* jobs.get(result.metadata.sessionId!)
       expect(result.metadata.background).toBe(true)
       expect(result.output).toContain(`state="running"`)
       expect(job?.status).toBe("running")
@@ -729,16 +729,16 @@ describe("tool.task", () => {
           description: "add investigation scope",
           prompt: "also inspect cancellation",
           subagent_type: "general",
-          task_id: started.metadata.sessionId,
+          task_id: started.metadata.sessionId!,
         },
         context,
       )
 
-      expect(result.metadata.sessionId).toBe(started.metadata.sessionId)
+      expect(result.metadata.sessionId!).toBe(started.metadata.sessionId!)
       expect(result.metadata.background).toBe(true)
       expect(result.output).toContain("Background task updated")
       first.resolve()
-      expect((yield* jobs.get(started.metadata.sessionId))?.status).toBe("running")
+      expect((yield* jobs.get(started.metadata.sessionId!))?.status).toBe("running")
       expect((yield* Effect.promise(() => updated.promise)).parts).toEqual([
         {
           type: "text",
@@ -749,7 +749,7 @@ describe("tool.task", () => {
       ])
 
       second.resolve()
-      const waited = yield* jobs.wait({ id: started.metadata.sessionId, timeout: 1_000 })
+      const waited = yield* jobs.wait({ id: started.metadata.sessionId!, timeout: 1_000 })
       expect(waited.info?.status).toBe("completed")
       expect(waited.info?.output).toBe("second done")
       const notification = yield* Effect.promise(() => injected.promise)
@@ -785,7 +785,7 @@ describe("tool.task", () => {
         },
       )
 
-      const waited = yield* jobs.wait({ id: result.metadata.sessionId, timeout: 1_000 })
+      const waited = yield* jobs.wait({ id: result.metadata.sessionId!, timeout: 1_000 })
       expect(waited.timedOut).toBe(false)
       expect(waited.info?.status).toBe("completed")
       expect(waited.info?.output).toBe("background done")
@@ -824,7 +824,7 @@ describe("tool.task", () => {
         },
       )
 
-      const waited = yield* jobs.wait({ id: result.metadata.sessionId, timeout: 1_000 })
+      const waited = yield* jobs.wait({ id: result.metadata.sessionId!, timeout: 1_000 })
       expect(waited.timedOut).toBe(false)
       expect(waited.info?.status).toBe("completed")
     }),
@@ -863,7 +863,7 @@ describe("tool.task", () => {
       )
 
       yield* sessions.remove(chat.id)
-      const waited = yield* jobs.wait({ id: result.metadata.sessionId, timeout: 1_000 })
+      const waited = yield* jobs.wait({ id: result.metadata.sessionId!, timeout: 1_000 })
       expect(waited.timedOut).toBe(false)
       expect(waited.info?.status).toBe("cancelled")
     }),
@@ -901,8 +901,8 @@ describe("tool.task", () => {
         },
       )
 
-      yield* sessions.remove(result.metadata.sessionId)
-      const waited = yield* jobs.wait({ id: result.metadata.sessionId, timeout: 1_000 })
+      yield* sessions.remove(result.metadata.sessionId!)
+      const waited = yield* jobs.wait({ id: result.metadata.sessionId!, timeout: 1_000 })
       expect(waited.timedOut).toBe(false)
       expect(waited.info?.status).toBe("cancelled")
     }),
@@ -941,7 +941,7 @@ describe("tool.task", () => {
       )
 
       yield* runState.cancel(chat.id)
-      const waited = yield* jobs.wait({ id: result.metadata.sessionId, timeout: 1_000 })
+      const waited = yield* jobs.wait({ id: result.metadata.sessionId!, timeout: 1_000 })
       expect(waited.timedOut).toBe(false)
       expect(waited.info?.status).toBe("cancelled")
     }),

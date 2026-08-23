@@ -42,14 +42,14 @@ function isCompletedToolPart(
 export function selectManthanToolPartsToCompact(
   msgs: SessionV1.WithParts[],
   opts: ManthanPruneOpts,
-): SessionV1.ToolPart[] {
+): (SessionV1.ToolPart & { state: SessionV1.ToolStateCompleted })[] {
   const keepRecent = keepRecentCount(opts.mode)
   let compactBeforeIndex = -1
   if (opts.compactMessageID) {
     compactBeforeIndex = msgs.findIndex((m) => m.info.id === opts.compactMessageID)
   }
 
-  const toCompact: SessionV1.ToolPart[] = []
+  const toCompact: (SessionV1.ToolPart & { state: SessionV1.ToolStateCompleted })[] = []
   let recentKept = 0
 
   for (let msgIndex = msgs.length - 1; msgIndex >= 0; msgIndex--) {
