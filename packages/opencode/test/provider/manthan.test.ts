@@ -454,6 +454,25 @@ describe("manthan Option A", () => {
     expect(orphan.markers[0]?.summary).toBe("Current task: explore repo")
   })
 
+  test("manthanCompactContinueText finishes subagents (name string or mode)", async () => {
+    const {
+      manthanCompactContinueText,
+      MANTHAN_COMPACT_CONTINUE_TEXT,
+      MANTHAN_SUBAGENT_COMPACT_CONTINUE_TEXT,
+      isManthanSubagentAgent,
+    } = await import("../../src/provider/manthan")
+    // Production bug: message.agent is "explore", not { mode: "subagent" }.
+    expect(isManthanSubagentAgent("explore")).toBe(true)
+    expect(isManthanSubagentAgent("general")).toBe(true)
+    expect(isManthanSubagentAgent("build")).toBe(false)
+    expect(manthanCompactContinueText("explore")).toBe(MANTHAN_SUBAGENT_COMPACT_CONTINUE_TEXT)
+    expect(manthanCompactContinueText("explore")).toContain("<task_result>")
+    expect(manthanCompactContinueText("explore")).not.toContain("Continue the unfinished work")
+    expect(manthanCompactContinueText({ mode: "subagent" })).toBe(MANTHAN_SUBAGENT_COMPACT_CONTINUE_TEXT)
+    expect(manthanCompactContinueText({ mode: "primary" })).toBe(MANTHAN_COMPACT_CONTINUE_TEXT)
+    expect(manthanCompactContinueText("build")).toBe(MANTHAN_COMPACT_CONTINUE_TEXT)
+  })
+
   test("shouldManthanCompactAutocontinue only when compact added and turn would exit", () => {
     expect(shouldManthanCompactAutocontinue({ added: true, finish: "stop" })).toBe(true)
     expect(shouldManthanCompactAutocontinue({ added: true, finish: "length" })).toBe(true)

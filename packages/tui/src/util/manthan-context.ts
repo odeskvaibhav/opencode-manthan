@@ -49,6 +49,10 @@ export function gpuWakePhaseLabel(input: {
     const msg = input.lastError?.message?.trim()
     return msg ? `GPU error: ${msg.slice(0, 80)}` : "GPU error — check Fleet"
   }
+  if (phase === "disabled") {
+    const msg = input.lastError?.message?.trim()
+    return msg ? msg.slice(0, 100) : "GPU fleet disabled (max VMs = 0)"
+  }
   if (phase === "capped" || input.status === "capped") return "GPU cap reached — queued"
   if (phase === "queued" || input.status === "queued") return "Queued for GPU…"
   return name ? `Waking GPU…${suffix}` : "Waking GPU…"
@@ -179,6 +183,16 @@ export async function waitForManthanGpuFromProvider(
           lastError?: { message?: string } | null
         }
         if (body.ready === true || body.status === "ready") return "ready"
+        if (body.phase === "disabled") {
+          opts?.onStatus?.(
+            gpuWakePhaseLabel({
+              status: body.status,
+              phase: body.phase,
+              lastError: body.lastError,
+            }),
+          )
+          return "capped"
+        }
         // Hard cap only when nothing is provisioning (phase wins over stale status).
         const wakePhases = new Set(["provisioning", "booting", "agent", "waking"])
         if (

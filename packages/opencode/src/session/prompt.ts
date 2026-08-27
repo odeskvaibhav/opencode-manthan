@@ -9,8 +9,9 @@ import { SessionRevert } from "./revert"
 import { Session } from "./session"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
-import { isManthanProviderID, manthanClientCompactAllowed, MANTHAN_COMPACT_CONTINUE_TEXT, requestManthanCompact, shouldManthanToolAvoidanceAutocontinue, manthanToolAvoidanceContinueText, rootUserAskFromMessages, countManthanToolAvoidanceContinues, sessionLastBashFailed } from "@/provider/manthan"
+import { isManthanLaunchMode, isManthanProviderID, manthanClientCompactAllowed, manthanCompactContinueText, requestManthanCompact, shouldManthanToolAvoidanceAutocontinue, manthanToolAvoidanceContinueText, rootUserAskFromMessages, countManthanToolAvoidanceContinues, sessionLastBashFailed } from "@/provider/manthan"
 import { pruneManthanLocalToolOutputs } from "./manthan-prune"
+import { NotFoundError } from "@/storage/storage"
 import {
   buildToolLoopPivotSteerText,
   peekToolLoopPivot,
@@ -77,6 +78,25 @@ const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
   "image/png",
   "image/webp",
 ])
+
+/** Subagents in soak/CLI/VS Code must finish — default cap stops Explore wedging. */
+function resolveAgentMaxSteps(agent: { mode?: string; steps?: number | null; name?: string }): number {
+  if (agent.steps != null && Number.isFinite(agent.steps)) return agent.steps
+  if (agent.mode === "subagent" && isManthanLaunchMode()) {
+    const fallback = agent.name === "explore" ? 12 : 18
+    const n = Number(process.env.MANTHAN_SUBAGENT_MAX_STEPS || String(fallback))
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback
+  }
+  return Infinity
+}
+
+/** Subagents must emit <task_result> when step cap forces early stop. */
+function maxStepsPromptForAgent(agent: { mode?: string }): string {
+  if (agent.mode === "subagent") {
+    return `${MAX_STEPS_PROMPT}\n\nFor task/explore subagents: wrap your final answer in <task_result>...</task_result> so the parent session can finish.`
+  }
+  return MAX_STEPS_PROMPT
+}
 
 const STRUCTURED_OUTPUT_DESCRIPTION = `Use this tool to return your final response in the requested structured format.
 
@@ -1259,6 +1279,9 @@ const layer = Layer.effect(
                   agent: lastUser.agent,
                   model: lastUser.model,
                 })
+                const sessForContinue = yield* sessions.get(sessionID).pipe(
+                  Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)),
+                )
                 yield* sessions.updatePart({
                   id: PartID.ascending(),
                   messageID: continueMsg.id,
@@ -1266,7 +1289,9 @@ const layer = Layer.effect(
                   type: "text",
                   metadata: { compaction_continue: true, manthan_compact_continue: true },
                   synthetic: true,
-                  text: MANTHAN_COMPACT_CONTINUE_TEXT,
+                  text: manthanCompactContinueText(
+                    sessForContinue?.parentID ? { mode: "subagent" } : lastUser.agent,
+                  ),
                   time: { start: Date.now(), end: Date.now() },
                 })
               }
@@ -1307,7 +1332,7 @@ const layer = Layer.effect(
             yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
             throw error
           }
-          const maxSteps = agent.steps ?? Infinity
+          const maxSteps = resolveAgentMaxSteps(agent)
           const isLastStep = step >= maxSteps
           msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
             Effect.provideService(RuntimeFlags.Service, flags),
@@ -1421,7 +1446,7 @@ const layer = Layer.effect(
               system,
               messages: [
                 ...modelMsgs,
-                ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),
+                ...(isLastStep ? [{ role: "assistant" as const, content: maxStepsPromptForAgent(agent) }] : []),
               ],
               tools,
               model,
@@ -1501,6 +1526,9 @@ const layer = Layer.effect(
                   agent: lastUser.agent,
                   model: lastUser.model,
                 })
+                const sessOverflow = yield* sessions.get(sessionID).pipe(
+                  Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)),
+                )
                 yield* sessions.updatePart({
                   id: PartID.ascending(),
                   messageID: continueMsg.id,
@@ -1508,7 +1536,9 @@ const layer = Layer.effect(
                   type: "text",
                   metadata: { compaction_continue: true, manthan_compact_continue: true },
                   synthetic: true,
-                  text: MANTHAN_COMPACT_CONTINUE_TEXT,
+                  text: manthanCompactContinueText(
+                    sessOverflow?.parentID ? { mode: "subagent" } : lastUser.agent,
+                  ),
                   time: { start: Date.now(), end: Date.now() },
                 })
               } else {

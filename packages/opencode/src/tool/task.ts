@@ -380,7 +380,8 @@ export const TaskTool = Tool.define<
             `You are a subagent working on: ${params.description}`,
             `Parent session: ${parentTitle}`,
             "Your context is isolated from the parent. Work from this brief and your tool results only.",
-            "When finished, return one concise final answer for the parent agent.",
+            "When finished, wrap your answer in <task_result>...</task_result> and stop. Do not keep searching forever.",
+            "If context was compacted or you are near a step limit: emit <task_result> immediately — do not read more files.",
             "</parent_task_brief>",
           ].join("\n"),
         }

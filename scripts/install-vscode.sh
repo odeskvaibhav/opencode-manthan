@@ -29,6 +29,17 @@ done
 
 chmod +x "$WRAPPER"
 
+if pgrep -x "Code" >/dev/null 2>&1 || pgrep -f "Visual Studio Code" >/dev/null 2>&1; then
+  echo "WARN: VS Code is running — quit it fully (Cmd+Q) before install, or the extension folder may not update."
+fi
+
+if ! command -v code >/dev/null 2>&1; then
+  echo "ERROR: 'code' CLI not in PATH." >&2
+  echo "  VS Code → Cmd+Shift+P → Shell Command: Install 'code' command in PATH" >&2
+  echo "  Then re-run this script." >&2
+  exit 1
+fi
+
 echo "==> build extension"
 cd "$EXT_DIR"
 bun install --frozen-lockfile 2>/dev/null || bun install
@@ -163,8 +174,24 @@ if [[ -d "$HOME/.vscode" ]] || command -v code >/dev/null 2>&1; then
     code --uninstall-extension sst-dev.opencode 2>/dev/null || true
   fi
   if [[ -n "$VSIX_PATH" ]] && command -v code >/dev/null 2>&1; then
-    code --install-extension "$VSIX_PATH" --force >/dev/null 2>&1 || true
+    echo "==> code --install-extension (authoritative)"
+    code --install-extension "$VSIX_PATH" --force
   fi
+else
+  echo "ERROR: no ~/.vscode and no 'code' CLI — extension was built but not installed." >&2
+  exit 1
+fi
+
+INSTALLED_EXT="${VSCODE_EXTENSIONS:-$HOME/.vscode/extensions}/${EXT_ID}-${VERSION}"
+if [[ ! -f "$INSTALLED_EXT/dist/extension.js" ]]; then
+  echo "ERROR: install incomplete — missing $INSTALLED_EXT/dist/extension.js" >&2
+  echo "  Quit VS Code (Cmd+Q), delete ~/.vscode/extensions/${EXT_ID}-* , re-run this script." >&2
+  exit 1
+fi
+
+if command -v code >/dev/null 2>&1; then
+  echo "==> installed extensions (manthan/opencode):"
+  code --list-extensions 2>/dev/null | grep -E 'manthan|opencode' || echo "    (none — install failed)"
 fi
 
 echo

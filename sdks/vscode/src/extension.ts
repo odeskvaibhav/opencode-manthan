@@ -139,6 +139,8 @@ export function activate(context: vscode.ExtensionContext) {
       _EXTENSION_OPENCODE_PORT: port.toString(),
       OPENCODE_CALLER: "vscode",
       OPENCODE_MANTHAN_MODE: "1",
+      // Cap Explore/task loops so subagents finish instead of wedging the one GPU worker.
+      MANTHAN_SUBAGENT_MAX_STEPS: process.env.MANTHAN_SUBAGENT_MAX_STEPS || "18",
     }
     const apiKey = settings.apiKey || process.env.MANTHAN_API_KEY
     if (apiKey) env.MANTHAN_API_KEY = apiKey

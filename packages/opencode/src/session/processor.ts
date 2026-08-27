@@ -28,7 +28,7 @@ import {
   parseManthanCompactMarkers,
   takeManthanContext,
   shouldManthanCompactAutocontinue,
-  MANTHAN_COMPACT_CONTINUE_TEXT,
+  manthanCompactContinueText,
   requestManthanCompact,
   isManthanProviderID,
   manthanClientCompactAllowed,
@@ -626,7 +626,12 @@ const layer = Layer.effect(
                     type: "text",
                     metadata: { compaction_continue: true, manthan_compact_continue: true },
                     synthetic: true,
-                    text: MANTHAN_COMPACT_CONTINUE_TEXT,
+                    // Child sessions are always subagents; agent field is a name string.
+                    text: manthanCompactContinueText(
+                      current.parentID
+                        ? { mode: "subagent" }
+                        : ctx.assistantMessage.agent,
+                    ),
                     time: { start: Date.now(), end: Date.now() },
                   })
                 }

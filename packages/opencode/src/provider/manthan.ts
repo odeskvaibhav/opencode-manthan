@@ -132,6 +132,10 @@ export function gpuWakePhaseLabel(input: {
     const msg = input.lastError?.message?.trim()
     return msg ? `GPU error: ${msg.slice(0, 80)}` : "GPU error — check Fleet"
   }
+  if (phase === "disabled") {
+    const msg = input.lastError?.message?.trim()
+    return msg ? msg.slice(0, 100) : "GPU fleet disabled (max VMs = 0)"
+  }
   if (phase === "capped" || input.status === "capped") return "GPU cap reached — queued"
   if (phase === "queued" || input.status === "queued") return "Queued for GPU…"
   return name ? `Waking GPU…${suffix}` : "Waking GPU…"
@@ -210,6 +214,7 @@ export async function waitForManthanGpu(input: {
     }
     input.onStatus?.(snap)
     if (snap.ready || snap.status === "ready") return snap
+    if (snap.phase === "disabled") return snap
     const wakePhases = new Set(["provisioning", "booting", "agent", "waking"])
     if (
       (snap.status === "capped" || snap.phase === "capped") &&
@@ -1164,6 +1169,41 @@ export function clearManthanCompactQueue(): void {
 /** Synthetic follow-up after Manthan server compact (mirrors OpenCode autocontinue). */
 export const MANTHAN_COMPACT_CONTINUE_TEXT =
   "Context was compacted mid-task. Continue the unfinished work immediately with tools. Do not stop or ask for clarification unless the task is truly blocked — pick up from the recap's pending/next step."
+
+/**
+ * Subagent compact continue must NOT say "keep using tools" — that re-fills
+ * context and leaves Explore wedged. Message.agent is a name string ("explore"),
+ * not `{ mode: "subagent" }`.
+ */
+export const MANTHAN_SUBAGENT_COMPACT_CONTINUE_TEXT =
+  "Context was compacted. You are a task/explore subagent. " +
+  "Do NOT read, grep, or glob more files. Emit your best answer now inside " +
+  "<task_result>...</task_result>, then stop so the parent can finish."
+
+const MANTHAN_SUBAGENT_AGENT_NAMES = new Set(["explore", "general"])
+
+/** True when agent ref is a Manthan task subagent (name string or Agent-like). */
+export function isManthanSubagentAgent(
+  agent?: { mode?: string; name?: string } | string | null,
+): boolean {
+  if (agent == null) return false
+  if (typeof agent === "string") {
+    return MANTHAN_SUBAGENT_AGENT_NAMES.has(agent.trim().toLowerCase())
+  }
+  if (agent.mode === "subagent") return true
+  if (agent.name && MANTHAN_SUBAGENT_AGENT_NAMES.has(agent.name.trim().toLowerCase())) {
+    return true
+  }
+  return false
+}
+
+/** Subagents finish after compact; primary continues with tools. */
+export function manthanCompactContinueText(
+  agent?: { mode?: string; name?: string } | string | null,
+): string {
+  if (isManthanSubagentAgent(agent)) return MANTHAN_SUBAGENT_COMPACT_CONTINUE_TEXT
+  return MANTHAN_COMPACT_CONTINUE_TEXT
+}
 
 /**
  * After Manthan condenses, the current assistant often finishes with `stop`.
