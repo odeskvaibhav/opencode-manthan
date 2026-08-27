@@ -78,11 +78,17 @@ export function buildManthanConfigContent(settings: ManthanSettings): string {
           apiKey: settings.apiKey || "{env:MANTHAN_API_KEY}",
           includeUsage: true,
           timeout: 1_200_000,
-          chunkTimeout: 900_000,
+          // Fail hung SSE after compact/prefill — must exceed server compact (~3–5m).
+          chunkTimeout: 600_000,
           headers,
         },
         models,
       },
+    },
+    // Keep tool transcripts small — large reads caused Payload Too Large mid-Explore.
+    tool_output: {
+      max_bytes: 16_384,
+      max_lines: 400,
     },
   }
   // Only pin when the caller explicitly set a model; otherwise OpenCode lists

@@ -8,11 +8,15 @@ import { evaluate } from "@/permission/evaluate"
 import { Config } from "@/config/config"
 import { ToolID } from "./schema"
 import { TRUNCATION_DIR } from "./truncation-dir"
+import { isManthanLaunchMode } from "@/provider/manthan"
 
 const RETENTION = Duration.days(7)
 
 export const MAX_LINES = 2000
 export const MAX_BYTES = 50 * 1024
+/** Manthan one-GPU: keep tool payloads small or the next turn 413s / hangs. */
+export const MANTHAN_MAX_LINES = 400
+export const MANTHAN_MAX_BYTES = 16 * 1024
 export const DIR = TRUNCATION_DIR
 export const GLOB = path.join(TRUNCATION_DIR, "*")
 
@@ -74,11 +78,14 @@ const layer = Layer.effect(
 
     const limits = Effect.fn("Truncate.limits")(function* () {
       const configSvc = yield* Effect.serviceOption(Config.Service)
-      if (Option.isNone(configSvc)) return { maxLines: MAX_LINES, maxBytes: MAX_BYTES }
+      const manthan = isManthanLaunchMode()
+      const defaultLines = manthan ? MANTHAN_MAX_LINES : MAX_LINES
+      const defaultBytes = manthan ? MANTHAN_MAX_BYTES : MAX_BYTES
+      if (Option.isNone(configSvc)) return { maxLines: defaultLines, maxBytes: defaultBytes }
       const cfg = yield* configSvc.value.get().pipe(Effect.catch(() => Effect.succeed(undefined)))
       return {
-        maxLines: cfg?.tool_output?.max_lines ?? MAX_LINES,
-        maxBytes: cfg?.tool_output?.max_bytes ?? MAX_BYTES,
+        maxLines: cfg?.tool_output?.max_lines ?? defaultLines,
+        maxBytes: cfg?.tool_output?.max_bytes ?? defaultBytes,
       }
     })
 
@@ -126,9 +133,10 @@ const layer = Layer.effect(
       const preview = out.join("\n")
       const file = yield* write(text)
 
-      const hint = hasTaskTool(agent)
-        ? `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse the Task tool to have explore agent process this file with Grep and Read (with offset/limit). Do NOT read the full file yourself - delegate to save context.`
-        : `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse Grep to search the full content or Read with offset/limit to view specific sections.`
+      const hint =
+        hasTaskTool(agent) && agent?.mode !== "subagent"
+          ? `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse the Task tool to have explore agent process this file with Grep and Read (with offset/limit). Do NOT read the full file yourself - delegate to save context.`
+          : `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse Grep to search the full content or Read with offset/limit to view specific sections. Do NOT spawn another explore task.`
 
       return {
         content:

@@ -84,7 +84,8 @@ function resolveAgentMaxSteps(agent: { mode?: string; steps?: number | null; nam
   if (agent.steps != null && Number.isFinite(agent.steps)) return agent.steps
   if (agent.mode === "subagent" && isManthanLaunchMode()) {
     const fallback = agent.name === "explore" ? 12 : 18
-    const n = Number(process.env.MANTHAN_SUBAGENT_MAX_STEPS || String(fallback))
+    const envKey = agent.name === "explore" ? "MANTHAN_EXPLORE_MAX_STEPS" : "MANTHAN_SUBAGENT_MAX_STEPS"
+    const n = Number(process.env[envKey] || String(fallback))
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback
   }
   return Infinity
